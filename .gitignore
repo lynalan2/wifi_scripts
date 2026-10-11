@@ -1,0 +1,12 @@
+.vs/
+bin/
+obj/
+*.user
+*.suo
+TestResults/
+packages/
+*.cap
+*.csv
+*.sh
+*.pyc
+test.py
