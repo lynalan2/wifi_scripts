@@ -10,3 +10,5 @@ packages/
 *.sh
 *.pyc
 test.py
+*.txt
+*.hc22000
