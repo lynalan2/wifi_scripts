@@ -5,6 +5,7 @@ import sys
 import time
 import subprocess
 import re
+from cracker import cracker_menu
 
 from adapters import get_name_mac_type_adapters, get_wifi_info
 from adapter_ch_mode import (
@@ -71,7 +72,8 @@ def main_menu(interface):
         print()
         print("  1. Включить режим monitor")
         print("  2. Включить режим managed")
-        print("  3. Ловля handshake")
+        print("  3. Анализ сети")
+        print("  4. Взлом пароля")
         print()
         print("  0. Сменить адаптер")
         print("  9. Выход")
@@ -98,6 +100,13 @@ def main_menu(interface):
                 print("\n[*] Прервано.")
             pause()
 
+        elif choice == '4':
+            try:
+                cracker_menu()
+            except KeyboardInterrupt:
+                print("\n[*] Прервано.")
+            pause()
+
         elif choice == '0':
             return 'change'
 
@@ -116,6 +125,22 @@ def check_root():
         print("[-] Запустите с sudo.")
         sys.exit(1)
 
+def ask_restore_managed(interface):
+    """
+    Спрашивает, возвращать ли адаптер в managed при выходе.
+    Возвращает True/False.
+    """
+    print()
+    print(f"[?] Вернуть {interface} в режим managed перед выходом?")
+    print("    Y — вернуть (адаптер снова сможет подключаться к Wi-Fi)")
+    print("    N — оставить как есть (monitor)")
+    while True:
+        ans = input("Выбор (Y/n): ").strip().lower()
+        if ans in ('', 'y', 'yes', 'д', 'да'):
+            return True
+        if ans in ('n', 'no', 'н', 'нет'):
+            return False
+        print("Введите Y или N.")
 
 def main():
     check_root()
@@ -143,9 +168,11 @@ def main():
 
         if result == 'exit':
             if get_interface_mode(interface).lower() == "monitor":
-                print("\n[*] Возвращаю адаптер в managed...")
-                set_managed_mode(interface)
-            
+                if ask_restore_managed(interface):
+                    print("\n[*] Возвращаю адаптер в managed...")
+                    set_managed_mode(interface)
+                else:
+                    print("[*] Адаптер оставлен в monitor.")
             return
         
 
