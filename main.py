@@ -71,14 +71,19 @@ def main_menu(interface):
         clear_screen()
         print_header(interface)
         print()
-        print("  1. Включить режим monitor")
-        print("  2. Включить режим managed")
-        print("  3. Анализ сети")
-        print("  4. Взлом пароля")
-        print("  5. Захват handshake (hcxdumptool)")
+        print("  Адаптер:")
+        print("    1. Включить режим monitor")
+        print("    2. Включить режим managed")
         print()
-        print("  0. Сменить адаптер")
-        print("  9. Выход")
+        print("  Захват:")
+        print("    3. Анализ сети (деаутентификация)")
+        print("    4. Захват handshake (hcxdumptool)")
+        print()
+        print("  Взлом:")
+        print("    5. Взлом пароля")
+        print()
+        print("    0. Сменить адаптер")
+        print("    9. Выход")
         print()
 
         choice = input("Выбор: ").strip()
@@ -103,19 +108,19 @@ def main_menu(interface):
             pause()
 
         elif choice == '4':
-            try:
-                cracker_menu()
-            except KeyboardInterrupt:
-                print("\n[*] Прервано.")
-            pause()
-
-        elif choice == '5':
             if get_interface_mode(interface).lower() != "monitor":
                 print("\n[-] Сначала включите режим monitor (пункт 1).")
                 pause()
                 continue
             try:
                 hcxdumptool_flow(interface)
+            except KeyboardInterrupt:
+                print("\n[*] Прервано.")
+            pause()
+
+        elif choice == '5':
+            try:
+                cracker_menu()
             except KeyboardInterrupt:
                 print("\n[*] Прервано.")
             pause()

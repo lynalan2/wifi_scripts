@@ -266,13 +266,11 @@ def scan_networks(interface, duration, work_dir):
 
         try:
             term_proc = subprocess.Popen(launch, preexec_fn=os.setsid)
-            print(f"[*] Сканирование открыто в отдельном окне ({term_name}).")
         except Exception as e:
             print(f"[!] Не удалось открыть {term_name}: {e}")
             term_proc = None
 
     if term_proc is None:
-        # Fallback: тот же терминал, stdout в /dev/null
         print("[!] Терминал не найден, запускаю сканирование здесь же.")
         cmd = ["airodump-ng", "--band", "abg",
                "--write", prefix, "--output-format", "csv",
@@ -282,37 +280,24 @@ def scan_networks(interface, duration, work_dir):
         )
 
     if duration is None:
-        print("[*] Бесконечное сканирование. Ctrl+C — остановить.\n")
+        print("[*] Сканирование... Ctrl+C — остановить.")
     else:
-        print(f"[*] Сканирование {duration} сек. Можно прервать Ctrl+C.\n")
+        print(f"[*] Сканирование {duration} сек (Ctrl+C — остановить).")
 
     try:
         if duration is None:
-            last = -1
-            while True:
-                # пользователь закрыл окно xterm — выходим
-                if term_proc.poll() is not None:
-                    print("\n[*] Окно сканирования закрыто. Останавливаю.")
-                    break
+            while term_proc.poll() is None:
                 time.sleep(1)
-                count = len(parse_airodump_csv(csv_file))
-                if count != last:
-                    print(f"\r[*] Найдено сетей: {count}", end='', flush=True)
-                    last = count
         else:
             for remaining in range(duration, 0, -1):
                 if term_proc.poll() is not None:
-                    print("\n[*] Окно сканирования закрыто. Останавливаю.")
                     break
                 time.sleep(1)
-                count = len(parse_airodump_csv(csv_file))
-                print(f"\r[*] Осталось: {remaining:3d} сек | Сетей: {count}",
-                      end='', flush=True)
+                print(f"\r[*] Осталось: {remaining:3d} сек", end='', flush=True)
             print()
     except KeyboardInterrupt:
-        print("\n[*] Сканирование остановлено пользователем.")
+        print("\n[*] Остановлено.")
     finally:
-        # Даём airodump-ng дописать CSV, если он ещё жив
         if term_proc.poll() is None:
             try:
                 os.killpg(os.getpgid(term_proc.pid), signal.SIGINT)
@@ -477,13 +462,6 @@ def _kill_group(proc):
     except (ProcessLookupError, PermissionError):
         pass
 
-def _file_stale(path, threshold=15):
-    """True, если файл не обновлялся дольше threshold секунд."""
-    if not os.path.exists(path):
-        return True
-    return (time.time() - os.path.getmtime(path)) > threshold
-
-
 def _any_file_fresh(paths, threshold=15):
     """True, если хотя бы один из файлов обновлялся не позднее threshold сек назад."""
     for p in paths:
@@ -578,7 +556,6 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     term_name, term_cmd = find_terminal()
     if term_name is None:
         print("[!] Терминал не найден. Захват в этом окне, без графики.")
-        # Fallback: airodump в фон, без окна
         prefix = str(work_dir / f"capture_{bssid.replace(':', '')}")
         airodump = subprocess.Popen(
             ["airodump-ng", "--bssid", bssid, "--channel", channel,
@@ -588,24 +565,18 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
         cap_term = None
     else:
         cap_term = _launch_in_terminal(term_name, term_cmd, cap_script)
-        airodump = cap_term  # для единообразия poll() ниже
-        if cap_term is not None:
-            print(f"[*] Захват открыт в отдельном окне ({term_name}).")
+        airodump = cap_term
 
     # Общий флаг остановки для фоновых потоков (watchdog + fallback-деаут).
     stop_watchdog = threading.Event()
 
-    # Окно с деаутентификацией
     deauth_term = None
     if deauth:
         deauth_script = _build_deauth_script(work_dir, interface, target)
         if term_name is not None:
             deauth_term = _launch_in_terminal(term_name, term_cmd, deauth_script)
-            if deauth_term is not None:
-                print(f"[*] Деаутентификация открыта во втором окне ({term_name}).")
         else:
-            # Fallback: фоновый цикл без вывода. Завязан на stop_watchdog,
-            # иначе поток деаутил бы вечно и после завершения захвата.
+            # Завязан на stop_watchdog, иначе поток деаутил бы вечно и после захвата.
             def _deauth_loop():
                 while not stop_watchdog.is_set():
                     subprocess.run(
@@ -617,13 +588,10 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
                             break
                         time.sleep(1)
             threading.Thread(target=_deauth_loop, daemon=True).start()
-            print("[*] Деаутентификация запущена в фоне (без вывода).")
 
-    print(f"\n[*] Цель:   {essid} ({bssid}), канал {channel}")
-    print(f"[*] Файл:   {cap_file}")
+    print(f"\n[*] Цель:    {essid} ({bssid}), канал {channel}")
+    print(f"[*] Файл:    {cap_file}")
     print(f"[*] Таймаут: {timeout} сек (Ctrl+C — остановить)")
-
-
 
     csv_file = cap_file.replace("-01.cap", "-01.csv")
     watch_files = [cap_file, csv_file]
@@ -635,17 +603,15 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     )
     watchdog.start()
 
-
     start = time.time()
     found = False
     try:
         while time.time() - start < timeout:
-            # если ЛЮБОЕ окно закрыто — выходим, второе закроем в finally
             if cap_term is not None and cap_term.poll() is not None:
-                print("\n[*] Окно захвата закрыто — закрываю второе.")
+                print("\n[*] Окно захвата закрыто.")
                 break
             if deauth_term is not None and deauth_term.poll() is not None:
-                print("\n[*] Окно деаутентификации закрыто — закрываю второе.")
+                print("\n[*] Окно деаутентификации закрыто.")
                 break
 
             if os.path.exists(cap_file) and check_handshake(cap_file):
@@ -663,7 +629,6 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
         _kill_group(deauth_term)
         _kill_group(cap_term)
         if cap_term is None and airodump is not None and airodump.poll() is None:
-            # fallback-режим без окна
             try:
                 airodump.send_signal(signal.SIGINT)
                 airodump.wait(timeout=5)
@@ -831,7 +796,6 @@ def handshake_flow(interface):
             else:
                 print("\n[-] Handshake не пойман.")
 
-            # цикл сам вернётся к choose_action()
 
     finally:
         try:

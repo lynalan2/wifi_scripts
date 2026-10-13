@@ -143,6 +143,53 @@ def add_cap(state):
     print(f"[+] Добавлено: {name}")
 
 
+def _unique_hc_path(name):
+    dest = CAPTURES_DIR / f"{name}.hc22000"
+    n = 1
+    while dest.exists():
+        dest = CAPTURES_DIR / f"{name}_{n}.hc22000"
+        n += 1
+    return dest
+
+
+def add_hc22000(state):
+    path = input("\nПуть к .hc22000 файлу: ").strip()
+    if not path:
+        return
+    p = Path(path).expanduser()
+    if not p.exists():
+        print(f"[-] Файл не найден: {p}")
+        return
+    if p.suffix.lower() != ".hc22000":
+        print("[-] Ожидается файл с расширением .hc22000")
+        return
+
+    lines = _read_hashes(p)
+    if not any(l.startswith("WPA*") for l in lines):
+        print("[-] Файл не похож на hc22000 (нет строк WPA*...).")
+        return
+
+    name = input("Название (Enter — имя файла): ").strip() or p.stem
+    init_dirs()
+    dest = _unique_hc_path(name)
+    try:
+        shutil.copy2(p, dest)
+    except Exception as e:
+        print(f"[-] Не удалось скопировать: {e}")
+        return
+
+    state["caps"].append({
+        "path": str(p.resolve()),
+        "name": name,
+        "hc22000": str(dest),
+        "session": None,
+        "progress": 0,
+        "cracked": False,
+    })
+    save_state(state)
+    print(f"[+] Добавлено: {name}  ->  {dest.name}")
+
+
 def remove_cap(state):
     if not state["caps"]:
         print("[-] Список cap пуст.")
@@ -308,7 +355,7 @@ def run_cracking(state):
     cap = state["caps"][idx]
 
     if cap.get("cracked"):
-        print("[*] Этот cap уже взломан. Смотрите результаты в меню (пункт 9).")
+        print("[*] Этот cap уже взломан. Смотрите результаты в меню (пункт 10).")
         return
 
     # выбор словаря
@@ -430,7 +477,7 @@ def run_cracking(state):
         time.sleep(1)
 
     if cap.get("cracked"):
-        print(f"[+] Готово: {cap['name']} — пароль в пункте 9.")
+        print(f"[+] Готово: {cap['name']} — пароль в пункте 10.")
     else:
         print(f"\n[+] Сессия сохранена: {session_name} ({cap.get('progress', 0)}%)")
 
@@ -578,19 +625,23 @@ def cracker_menu():
         print("  Взлом пароля (hashcat)")
         print("=" * 62)
         print()
-        print("  1. Добавить cap")
-        print("  2. Удалить cap")
-        print("  3. Просмотр доступных cap")
+        print("  Файлы для взлома:")
+        print("    1. Добавить cap (.cap)")
+        print("    2. Добавить готовый .hc22000")
+        print("    3. Удалить cap")
+        print("    4. Просмотр доступных cap")
         print()
-        print("  4. Добавить словарь")
-        print("  5. Удалить словарь")
-        print("  6. Просмотр словарей")
+        print("  Словари:")
+        print("    5. Добавить словарь")
+        print("    6. Удалить словарь")
+        print("    7. Просмотр словарей")
         print()
-        print("  7. Начать/продолжить взлом")
-        print("  8. Просмотр сессий")
-        print("  9. Подобранные пароли")
+        print("  Взлом:")
+        print("    8. Начать/продолжить взлом")
+        print("    9. Просмотр сессий")
+        print("   10. Подобранные пароли")
         print()
-        print("  0. Назад")
+        print("    0. Назад")
         print()
 
         choice = input("Выбор: ").strip()
@@ -598,20 +649,22 @@ def cracker_menu():
         if choice == '1':
             add_cap(state)
         elif choice == '2':
-            remove_cap(state)
+            add_hc22000(state)
         elif choice == '3':
-            list_caps(state)
+            remove_cap(state)
         elif choice == '4':
-            add_wordlist(state)
+            list_caps(state)
         elif choice == '5':
-            remove_wordlist(state)
+            add_wordlist(state)
         elif choice == '6':
-            list_wordlists(state)
+            remove_wordlist(state)
         elif choice == '7':
-            run_cracking(state)
+            list_wordlists(state)
         elif choice == '8':
-            list_sessions(state)
+            run_cracking(state)
         elif choice == '9':
+            list_sessions(state)
+        elif choice == '10':
             list_cracked(state)
         elif choice == '0':
             return
