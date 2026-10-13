@@ -477,20 +477,28 @@ def _kill_group(proc):
     except (ProcessLookupError, PermissionError):
         pass
 
-def _cap_file_stale(cap_file, threshold=15):
-    """True, если .cap не обновлялся дольше threshold секунд."""
-    if not os.path.exists(cap_file):
+def _file_stale(path, threshold=15):
+    """True, если файл не обновлялся дольше threshold секунд."""
+    if not os.path.exists(path):
         return True
-    return (time.time() - os.path.getmtime(cap_file)) > threshold
+    return (time.time() - os.path.getmtime(path)) > threshold
 
 
-def _revive_watchdog(interface, cap_file, stop_event,
-                     check_interval=5, stale_threshold=15, cooldown=20,
+def _any_file_fresh(paths, threshold=15):
+    """True, если хотя бы один из файлов обновлялся не позднее threshold сек назад."""
+    for p in paths:
+        if os.path.exists(p) and (time.time() - os.path.getmtime(p)) <= threshold:
+            return True
+    return False
+
+
+def _revive_watchdog(interface, watch_files, stop_event,
+                     check_interval=5, stale_threshold=30, cooldown=20,
                      revive_seconds=20):
     """
-    Следит за mtime .cap-файла. Если файл не обновляется stale_threshold
-    секунд — запускает airodump-ng БЕЗ фиксации канала на revive_seconds секунд,
-    чтобы драйвер переинициализировался.
+    Следит за mtime файлов из watch_files (.cap, .csv). Если ни один
+    не обновлялся stale_threshold секунд — гоняет airodump-ng без канала
+    revive_seconds секунд, чтобы драйвер переинициализировался.
     """
     last_revive = 0
     while not stop_event.is_set():
@@ -498,20 +506,17 @@ def _revive_watchdog(interface, cap_file, stop_event,
         if stop_event.is_set():
             break
 
-        if not _cap_file_stale(cap_file, stale_threshold):
+        if _any_file_fresh(watch_files, stale_threshold):
             continue
 
         if time.time() - last_revive < cooldown:
             continue
 
-        print(f"\n[!] .cap не обновляется >{stale_threshold} сек — "
+        print(f"\n[!] Ни .cap, ни .csv не обновляются >{stale_threshold} сек — "
               f"оживляю без фиксации канала ({revive_seconds} сек).")
 
-        # Запускаем airodump-ng без --channel, чтобы он прошелся по всем каналам
-        revive_cmd = ["airodump-ng", interface]
-
         revive = subprocess.Popen(
-            revive_cmd,
+            ["airodump-ng", interface],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid
         )
@@ -531,8 +536,7 @@ def _revive_watchdog(interface, cap_file, stop_event,
                 pass
 
         last_revive = time.time()
-        print("[+] Оживление завершено, жду восстановления захвата.")
-
+        print("[+] Оживление завершено.")
 
 def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
 
@@ -593,13 +597,18 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     print(f"[*] Таймаут: {timeout} сек (Ctrl+C — остановить)")
 
 
+
+    csv_file = cap_file.replace("-01.cap", "-01.csv")
+    watch_files = [cap_file, csv_file]
+
     stop_watchdog = threading.Event()
     watchdog = threading.Thread(
         target=_revive_watchdog,
-        args=(interface, cap_file, stop_watchdog), # channel убран
+        args=(interface, watch_files, stop_watchdog),
         daemon=True
     )
     watchdog.start()
+
 
     start = time.time()
     found = False
@@ -691,10 +700,14 @@ def ask_save_path(cap_file):
 def choose_action():
     """
     Меню действий с выбранной сетью.
-    Возвращает строковый ключ действия или None, если пользователь отменил.
+    Возвращает:
+      'deauth'  — активная деаутентификация + захват
+      'passive' — пассивное наблюдение
+      None      — выход назад
     """
     print("\nДействия с выбранной сетью:")
     print("  1. Деаутентификация")
+    print("  2. Пассивное наблюдение")
     print()
     print("  0. Назад")
     while True:
@@ -703,7 +716,9 @@ def choose_action():
             return None
         if c == '1':
             return 'deauth'
-        print("Неизвестный пункт. Введите 1 или 0.")
+        if c == '2':
+            return 'passive'
+        print("Неизвестный пункт. Введите 1, 2 или 0.")
 
 def handshake_flow(interface):
     # Всё пишем во временную папку. Если handshake не поймаем — она удалится.
@@ -719,7 +734,7 @@ def handshake_flow(interface):
 
         display_networks(networks)
 
-        # ---- Выбор цели (безопасный цикл) ----
+        # ---- Выбор цели ----
         target = None
         while True:
             try:
@@ -733,7 +748,6 @@ def handshake_flow(interface):
             if choice == "":
                 print("Пустой ввод. Введите число или 0 для отмены.")
                 continue
-
             if choice == "0":
                 print("[*] Отменено.")
                 return
@@ -747,18 +761,24 @@ def handshake_flow(interface):
             if 0 <= idx < len(networks):
                 target = networks[idx]
                 break
-
             print(f"Ошибка: число должно быть от 1 до {len(networks)}.")
 
-        # Сюда попадаем только когда target реально выбран
-        print(f"\n[*] Цель: {target['essid'] or '<скрытая>'} ({target['bssid']})")
+        # ---- Цикл действий над выбранной сетью ----
+        while True:
+            print(f"\n[*] Цель: {target['essid'] or '<скрытая>'} ({target['bssid']})")
+            action = choose_action()
+            if action is None:
+                print("[*] Возврат в меню.")
+                return
 
-        action = choose_action()
-        if action is None:
-            print("[*] Отменено.")
-            return
+            if action == 'deauth':
+                deauth = True
+            elif action == 'passive':
+                deauth = False
+            else:
+                print(f"[-] Неизвестное действие: {action}")
+                continue
 
-        if action == 'deauth':
             try:
                 timeout_str = input("\nТаймаут захвата в секундах (Enter = 180): ").strip()
                 timeout = int(timeout_str) if timeout_str else 180
@@ -768,7 +788,8 @@ def handshake_flow(interface):
                 timeout = 180
 
             cap_file = capture_handshake(
-                interface, target, tmp_dir, timeout=timeout, deauth=True
+                interface, target, tmp_dir,
+                timeout=timeout, deauth=deauth
             )
 
             if cap_file and os.path.exists(cap_file) and check_handshake(cap_file):
@@ -782,16 +803,15 @@ def handshake_flow(interface):
                 else:
                     print("[*] Файл не сохранён.")
             else:
-                print("\n[-] Handshake не пойман. Файлы не сохраняются.")
-        else:
-            print(f"[-] Неизвестное действие: {action}")
+                print("\n[-] Handshake не пойман.")
+
+            # цикл сам вернётся к choose_action()
 
     finally:
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass
-
 
 def main():
     check_root()
