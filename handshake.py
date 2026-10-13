@@ -494,17 +494,37 @@ def _any_file_fresh(paths, threshold=15):
 
 def _revive_watchdog(interface, watch_files, stop_event,
                      check_interval=5, stale_threshold=30, cooldown=20,
-                     revive_seconds=20):
+                     revive_seconds=20, startup_grace=45):
     """
     Следит за mtime файлов из watch_files (.cap, .csv). Если ни один
     не обновлялся stale_threshold секунд — гоняет airodump-ng без канала
     revive_seconds секунд, чтобы драйвер переинициализировался.
+
+    startup_grace — окно в начале, пока airodump-ng ещё поднимается и создаёт
+    .cap/.csv. В это время отсутствие свежих файлов — норма, а не зависание.
     """
-    last_revive = 0
+    start = time.time()
+    # Фикс: cooldown должен действовать и на первой итерации. С last_revive=0
+    # (time.time()-0 ≈ 1.7e9) он никогда не срабатывал, и оживление запускалось
+    # сразу же, ещё до создания файлов захвата.
+    last_revive = start
+    seen_file = False
+
     while not stop_event.is_set():
         time.sleep(check_interval)
         if stop_event.is_set():
             break
+
+        # Фаза старта: airodump-ng ещё не создал файлы — не считаем это зависанием.
+        if time.time() - start < startup_grace:
+            continue
+
+        # Пока ни один файл ни разу не появился, захват ещё поднимается, а не завис.
+        # Как только файл появился хоть раз — дальше судим по свежести mtime.
+        if any(os.path.exists(p) for p in watch_files):
+            seen_file = True
+        elif not seen_file:
+            continue
 
         if _any_file_fresh(watch_files, stale_threshold):
             continue
