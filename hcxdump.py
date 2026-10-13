@@ -198,7 +198,6 @@ def hcxdumptool_flow(interface):
                 label = _types_label(info["types"])
 
                 if bssid in saved:
-                    # Та же сеть уже сохранена ранее — повторно не сохраняем.
                     dup_skips += 1
                     print(f"    - {essid} [{bssid}] {label}: "
                           f"уже сохранён (прогон {saved[bssid]['run']}), пропускаю.")
