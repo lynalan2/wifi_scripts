@@ -16,6 +16,7 @@ from adapter_ch_mode import (
     interface_exists,
 )
 from handshake import handshake_flow
+from hcxdump import hcxdumptool_flow
 
 
 # ============ Интерфейс ============
@@ -74,6 +75,7 @@ def main_menu(interface):
         print("  2. Включить режим managed")
         print("  3. Анализ сети")
         print("  4. Взлом пароля")
+        print("  5. Захват handshake (hcxdumptool)")
         print()
         print("  0. Сменить адаптер")
         print("  9. Выход")
@@ -103,6 +105,17 @@ def main_menu(interface):
         elif choice == '4':
             try:
                 cracker_menu()
+            except KeyboardInterrupt:
+                print("\n[*] Прервано.")
+            pause()
+
+        elif choice == '5':
+            if get_interface_mode(interface).lower() != "monitor":
+                print("\n[-] Сначала включите режим monitor (пункт 1).")
+                pause()
+                continue
+            try:
+                hcxdumptool_flow(interface)
             except KeyboardInterrupt:
                 print("\n[*] Прервано.")
             pause()

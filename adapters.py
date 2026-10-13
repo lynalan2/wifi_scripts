@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-import psutil
-import socket
 import sys
 import subprocess
 import re
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 def list_wifi_interfaces():

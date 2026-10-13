@@ -91,8 +91,15 @@ def load_state():
 
 
 def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
+    # Пишем во временный файл и атомарно заменяем, чтобы прерывание посреди
+    # записи (Ctrl+C) не оставило битый state.json.
+    init_dirs()
+    tmp = STATE_FILE.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, STATE_FILE)
 
 
 # ============ Управление cap ============
@@ -316,7 +323,7 @@ def run_cracking(state):
         return
     wordlist = state["wordlists"][widx]
 
-        # Если словарь другой или прошлая сессия завершена (100%) — начинаем заново
+    # Если словарь другой или прошлая сессия завершена (100%) — начинаем заново
     new_wordlist = cap.get("session_wordlist") != wordlist["path"]
     finished = cap.get("progress", 0) >= 100
 
@@ -324,21 +331,14 @@ def run_cracking(state):
         # старые файлы сессии (если есть) больше не нужны
         old_sess = cap.get("session")
         if old_sess:
-            for pat in (f"crack_{old_sess}.sh",
-                        f"log_{old_sess}.txt",
-                        f"out_{old_sess}.txt"):
+            for p in (DATA_DIR / f"crack_{old_sess}.sh",
+                      DATA_DIR / f"log_{old_sess}.txt",
+                      DATA_DIR / f"out_{old_sess}.txt",
+                      SESSIONS_DIR / f"{old_sess}.restore"):
                 try:
-                    (DATA_DIR / pat).unlink(missing_ok=True)
+                    p.unlink(missing_ok=True)
                 except Exception:
                     pass
-        # hashcat restore-файл тоже сносим, чтобы не тянул старую сессию
-        for d in (Path.home() / ".local/share/hashcat/sessions",
-                  Path.home() / ".hashcat/sessions"):
-            try:
-                for ext in (".restore", ".log", ".lock"):
-                    (d / f"{old_sess}{ext}").unlink(missing_ok=True)
-            except Exception:
-                pass
 
         cap["session"] = None
         cap["progress"] = 0
@@ -350,23 +350,29 @@ def run_cracking(state):
 
     out_file = DATA_DIR / f"out_{session_name}.txt"
     log_file = DATA_DIR / f"log_{session_name}.txt"
-
+    # Явный путь к restore-файлу — не угадываем папку сессий hashcat, а держим
+    # её у себя: так возобновление и очистка всегда работают с одним местом.
+    restore_file = SESSIONS_DIR / f"{session_name}.restore"
 
     # --- команда hashcat ---
     # potfile выключаем через --potfile-disable, чтобы не пересекаться с чужими сессиями
     common = (
         f'hashcat -m 22000 -a 0 '
         f'--session {session_name} '
+        f'--restore-file-path "{restore_file}" '
         f'--status --status-timer 2 '
         f'--potfile-disable '
         f'-o "{out_file}" '
     )
 
-    if cap.get("progress", 0) > 0:
-        # возобновление: hashcat подхватит .restore-файл из ~/.hashcat/sessions/
+    # Возобновляемся только если прогресс есть И restore-файл реально на месте.
+    if cap.get("progress", 0) > 0 and restore_file.exists():
         hashcat_cmd = f'{common}--restore'
         print(f"[*] Возобновляю сессию {session_name} (было {cap['progress']}%)")
     else:
+        if cap.get("progress", 0) > 0:
+            print("[!] restore-файл не найден — запускаю сессию заново.")
+            cap["progress"] = 0
         hashcat_cmd = f'{common}"{cap["hc22000"]}" "{wordlist["path"]}"'
         print(f"[*] Новая сессия {session_name}")
 
@@ -471,11 +477,42 @@ def list_cracked(state):
             str(c["cap"])[:40],
         ))
 
+def _parse_out_line(line, valid_essids):
+    """
+    Разбирает строку out-файла hashcat в (essid, password).
+
+    Поддерживает три формата:
+      1. -m 22000, --outfile-format по умолчанию: "WPA*02*...*ESSID_HEX*...:password"
+         (хеш через '*', затем одно ':' и пароль; ESSID берём из 6-го поля хеша).
+      2. Старый -m 2500: "PMK:AP_MAC:STA_MAC:ESSID:password" (5 полей через ':').
+      3. --outfile-format 2: только пароль (ESSID берём из .hc22000).
+    Возвращает (essid|None, password) или None, если строку не разобрать.
+    """
+    head = line.split(":", 1)[0]
+    # Формат 1: хеш 22000 начинается с WPA* (или это длинный токен с '*')
+    if head.startswith("WPA*") or head.count("*") >= 5:
+        hash_part, sep, plain = line.partition(":")
+        if not sep:
+            return None
+        return _essid_from_hash(hash_part), _decode_hashcat_plain(plain)
+
+    # Формат 2: PMK:AP:STA:ESSID:password (пароль может содержать ':')
+    parts = line.split(":", 4)
+    if len(parts) >= 5 and all(parts[:4]):
+        return parts[3], _decode_hashcat_plain(parts[4])
+
+    # Формат 3: только пароль
+    if ":" not in line:
+        essid = next(iter(valid_essids)) if valid_essids else None
+        return essid, _decode_hashcat_plain(line)
+
+    return None
+
+
 def _check_cracked(state, cap, out_file):
     """
-    Hashcat -m 22000 пишет в out-файл:
-        PMK:AP_MAC:STA_MAC:ESSID:password
-    Извлекаем ESSID и password, сверяем с .hc22000.
+    Читает out-файл hashcat, вытаскивает ESSID и пароль, сверяет с .hc22000
+    и регистрирует находку в state["cracked"].
     """
     if not os.path.exists(out_file):
         return False
@@ -500,15 +537,15 @@ def _check_cracked(state, cap, out_file):
 
     found_any = False
     for line in lines:
-        # PMK:AP:STA:ESSID:password  — ровно 5 полей, но пароль может содержать ':'
-        parts = line.split(":", 4)
-        if len(parts) < 5:
+        parsed = _parse_out_line(line, valid_essids)
+        if parsed is None:
             continue
-        essid = parts[3]
-        raw_password = parts[4]
-        password = _decode_hashcat_plain(raw_password)
+        essid, password = parsed
+        if not password:
+            continue
 
-        if valid_essids and essid not in valid_essids:
+        # Фильтруем по ESSID только если он известен и из этого cap-файла.
+        if essid and valid_essids and essid not in valid_essids:
             continue
 
         already = any(
