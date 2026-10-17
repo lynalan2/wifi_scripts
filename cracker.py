@@ -7,63 +7,18 @@
 import os
 import json
 import shutil
-import signal
 import subprocess
-import threading
 import time
 import re
 from pathlib import Path
 
-# ============ Пути ============
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "cracker_data"
-STATE_FILE = DATA_DIR / "state.json"
-WORDLISTS_DIR = DATA_DIR / "wordlists"
-CAPTURES_DIR = DATA_DIR / "captures"
-SESSIONS_DIR = DATA_DIR / "sessions"
+from wifitool.constants import (
+    BASE_DIR, DATA_DIR, STATE_FILE, WORDLISTS_DIR,
+    CAPTURES_DIR, SESSIONS_DIR, ROCKYOU_URL,
+)
+from wifitool.terminal import find_terminal, launch_in_terminal, kill_group
 
 HASHCAT_POTFILE = Path.home() / ".local/share/hashcat/hashcat.potfile"
-
-# ============ Терминал (переиспользуем логику из handshake.py) ============
-
-def find_terminal():
-    candidates = [
-        ("xterm",          ["xterm", "-e"]),
-        ("qterminal",      ["qterminal", "-e"]),
-        ("xfce4-terminal", ["xfce4-terminal", "-e"]),
-        ("gnome-terminal", ["gnome-terminal", "--"]),
-        ("konsole",        ["konsole", "-e"]),
-    ]
-    for name, cmd in candidates:
-        if shutil.which(name):
-            return name, cmd
-    return None, None
-
-
-def launch_in_terminal(term_name, term_cmd, script_path):
-    if term_name == "gnome-terminal":
-        launch = term_cmd + ["bash", str(script_path)]
-    else:
-        launch = term_cmd + [f"bash {script_path}"]
-    try:
-        return subprocess.Popen(launch, preexec_fn=os.setsid)
-    except Exception as e:
-        print(f"[!] Не удалось открыть {term_name}: {e}")
-        return None
-
-
-def kill_group(proc):
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
 
 
 # ============ Состояние ============
@@ -282,8 +237,7 @@ def ensure_default_wordlist(state):
     if not dest.exists():
         print("[*] Скачиваю rockyou.txt (это может занять время)...")
         r = subprocess.run(
-            ["wget", "-q", "-O", str(dest),
-             "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt"],
+            ["wget", "-q", "-O", str(dest), ROCKYOU_URL],
             capture_output=True, text=True
         )
         if r.returncode != 0 or not dest.exists():

@@ -14,15 +14,16 @@ import re
 import threading
 from pathlib import Path
 import shutil
-import tempfile     
+import tempfile
+
+from wifitool.system import check_root
+from wifitool.terminal import (
+    find_terminal,
+    launch_in_terminal as _launch_in_terminal,
+    kill_group as _kill_group,
+)
 
 # ============ Утилиты ============
-
-def check_root():
-    if os.geteuid() != 0:
-        print("[-] Запустите с sudo.")
-        sys.exit(1)
-
 
 def check_tools():
     missing = []
@@ -212,21 +213,6 @@ def ask_scan_duration():
     except ValueError:
         print("[-] Некорректно. Использую бесконечный режим.")
         return None
-
-def find_terminal():
-    """Ищет доступный эмулятор терминала. Возвращает (имя, базовую команду)."""
-    candidates = [
-        ("xterm",          ["xterm", "-e"]),
-        ("qterminal",      ["qterminal", "-e"]),
-        ("xfce4-terminal", ["xfce4-terminal", "-e"]),
-        ("gnome-terminal", ["gnome-terminal", "--"]),
-        ("konsole",        ["konsole", "-e"]),
-    
-    ]
-    for name, cmd in candidates:
-        if shutil.which(name):
-            return name, cmd
-    return None, None
 
 def scan_networks(interface, duration, work_dir):
     """
@@ -435,32 +421,6 @@ def _build_deauth_script(work_dir, interface, target):
     script_path.chmod(0o755)
     return script_path
 
-
-def _launch_in_terminal(term_name, term_cmd, script_path):
-    """Запускает bash-скрипт в отдельном окне терминала. Возвращает Popen или None."""
-    if term_name == "gnome-terminal":
-        launch = term_cmd + ["bash", str(script_path)]
-    else:
-        launch = term_cmd + [f"bash {script_path}"]
-    try:
-        return subprocess.Popen(launch, preexec_fn=os.setsid)
-    except Exception as e:
-        print(f"[!] Не удалось открыть {term_name}: {e}")
-        return None
-
-
-def _kill_group(proc):
-    """Корректно гасит группу процессов (терминал + его дети)."""
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
 
 def _any_file_fresh(paths, threshold=15):
     """True, если хотя бы один из файлов обновлялся не позднее threshold сек назад."""
