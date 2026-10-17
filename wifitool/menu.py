@@ -12,6 +12,7 @@ from typing import Callable
 from .capture import handshake_flow
 from .hcx import hcxdumptool_flow
 from .cracker import cracker_menu
+from .evil_twin import evil_twin_flow
 
 
 @dataclass
@@ -40,12 +41,8 @@ FEATURES = [
             hcxdumptool_flow, needs_monitor=True),
     Feature("5", "Взлом", "Взлом пароля",
             lambda interface: cracker_menu(), needs_monitor=False),
+    # Evil Twin сам управляет режимами адаптера (monitor для скана, managed
+    # для AP), поэтому needs_monitor=False.
+    Feature("6", "Атаки", "Evil Twin (поддельная точка + портал)",
+            evil_twin_flow, needs_monitor=False),
 ]
-
-
-# --- Пример: как добавить evil twin (раскомментировать и дописать модуль) ---
-# from .evil_twin import evil_twin_flow
-# FEATURES.append(
-#     Feature("6", "Атаки", "Evil Twin (поддельная точка)",
-#             evil_twin_flow, needs_monitor=True)
-# )

@@ -40,6 +40,19 @@ ROCKYOU_URL = (
 # ---- Наборы внешних утилит для проверки наличия ----
 TOOLS_HANDSHAKE = ("iw", "airodump-ng", "aireplay-ng", "aircrack-ng", "ip")
 TOOLS_HCXDUMP = ("hcxdumptool", "hcxpcapngtool", "timeout")
+TOOLS_EVIL_TWIN = ("hostapd", "dnsmasq", "iptables", "iw", "ip")
+
+# ---- Evil Twin ----
+EVIL_TWIN_DIR = BASE_DIR / "evil_twin_data"
+PORTAL_TEMPLATES_DIR = EVIL_TWIN_DIR / "templates"   # пользовательские шаблоны
+PORTAL_CAPTURED_FILE = EVIL_TWIN_DIR / "captured.txt"
+PORTAL_BUILTIN_DIR = BASE_DIR / "wifitool" / "portal_templates"  # встроенные
+
+AP_GATEWAY_IP = "10.0.0.1"
+AP_NETMASK = "255.255.255.0"
+AP_DHCP_START = "10.0.0.10"
+AP_DHCP_END = "10.0.0.100"
+PORTAL_PORT = 80
 
 # ---- ANSI-цвета ----
 GREEN = "\033[92m"

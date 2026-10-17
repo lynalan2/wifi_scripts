@@ -11,3 +11,5 @@ __pycache__/
 *.sh
 *.csv
 test.py
+# Evil Twin runtime data (captured creds, user portal templates)
+evil_twin_data/

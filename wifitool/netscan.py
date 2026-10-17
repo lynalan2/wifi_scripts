@@ -146,6 +146,33 @@ def ask_scan_duration():
         return None
 
 
+def choose_network(networks):
+    """Показывает сети и просит выбрать номер. Возвращает сеть или None (отмена)."""
+    display_networks(networks)
+    while True:
+        try:
+            choice = input(
+                f"\nВыберите номер сети (1-{len(networks)}, 0 — отмена): "
+            ).strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n[*] Отменено.")
+            return None
+        if choice == "":
+            print("Пустой ввод. Введите число или 0 для отмены.")
+            continue
+        if choice == "0":
+            print("[*] Отменено.")
+            return None
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            print(f"Ошибка: нужно целое число от 0 до {len(networks)}.")
+            continue
+        if 0 <= idx < len(networks):
+            return networks[idx]
+        print(f"Ошибка: число должно быть от 1 до {len(networks)}.")
+
+
 def scan_networks(interface, duration, work_dir):
     """
     Запускает airodump-ng в отдельном окне терминала и следит за CSV.
