@@ -17,6 +17,12 @@ from wifitool.constants import (
     CAPTURES_DIR, SESSIONS_DIR, ROCKYOU_URL,
 )
 from wifitool.terminal import find_terminal, launch_in_terminal, kill_group
+from wifitool.hashfile import (
+    read_hashes as _read_hashes,
+    decode_hashcat_plain as _decode_hashcat_plain,
+    essid_from_hash as _essid_from_hash,
+    parse_out_line as _parse_out_line,
+)
 
 HASHCAT_POTFILE = Path.home() / ".local/share/hashcat/hashcat.potfile"
 
@@ -436,35 +442,6 @@ def run_cracking(state):
         print(f"\n[+] Сессия сохранена: {session_name} ({cap.get('progress', 0)}%)")
 
 
-def _decode_hashcat_plain(plain):
-    """Если hashcat записал $HEX[...] — декодируем обратно в строку."""
-    if plain.startswith("$HEX[") and plain.endswith("]"):
-        try:
-            return bytes.fromhex(plain[5:-1]).decode("utf-8", errors="replace")
-        except Exception:
-            return plain
-    return plain
-
-
-def _read_hashes(hc22000_file):
-    """Возвращает список хешей из .hc22000."""
-    try:
-        with open(hc22000_file, "r", errors="ignore") as f:
-            return [l.strip() for l in f if l.strip()]
-    except Exception:
-        return []
-
-
-def _essid_from_hash(h):
-    """ESSID из строки WPA*02*MIC*AP*STA*ESSID_HEX*..."""
-    try:
-        parts = h.split("*")
-        if len(parts) > 5 and parts[5]:
-            return bytes.fromhex(parts[5]).decode("utf-8", errors="replace")
-    except Exception:
-        pass
-    return None
-
 def list_cracked(state):
     if not state["cracked"]:
         print("[-] Взломанных сетей пока нет.")
@@ -477,38 +454,6 @@ def list_cracked(state):
             str(c["password"])[:28],
             str(c["cap"])[:40],
         ))
-
-def _parse_out_line(line, valid_essids):
-    """
-    Разбирает строку out-файла hashcat в (essid, password).
-
-    Поддерживает три формата:
-      1. -m 22000, --outfile-format по умолчанию: "WPA*02*...*ESSID_HEX*...:password"
-         (хеш через '*', затем одно ':' и пароль; ESSID берём из 6-го поля хеша).
-      2. Старый -m 2500: "PMK:AP_MAC:STA_MAC:ESSID:password" (5 полей через ':').
-      3. --outfile-format 2: только пароль (ESSID берём из .hc22000).
-    Возвращает (essid|None, password) или None, если строку не разобрать.
-    """
-    head = line.split(":", 1)[0]
-    # Формат 1: хеш 22000 начинается с WPA* (или это длинный токен с '*')
-    if head.startswith("WPA*") or head.count("*") >= 5:
-        hash_part, sep, plain = line.partition(":")
-        if not sep:
-            return None
-        return _essid_from_hash(hash_part), _decode_hashcat_plain(plain)
-
-    # Формат 2: PMK:AP:STA:ESSID:password (пароль может содержать ':')
-    parts = line.split(":", 4)
-    if len(parts) >= 5 and all(parts[:4]):
-        return parts[3], _decode_hashcat_plain(parts[4])
-
-    # Формат 3: только пароль
-    if ":" not in line:
-        essid = next(iter(valid_essids)) if valid_essids else None
-        return essid, _decode_hashcat_plain(line)
-
-    return None
-
 
 def _check_cracked(state, cap, out_file):
     """

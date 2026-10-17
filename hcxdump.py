@@ -15,11 +15,12 @@
     прошлых прогонов, повторно (та же сеть) он не сохраняется.
 """
 
-import os
 import subprocess
 import tempfile
 import shutil
 from pathlib import Path
+
+from wifitool.hashfile import parse_hc22000 as _parse_hc22000, types_label as _types_label
 
 
 # ============ Утилиты ============
@@ -30,65 +31,10 @@ def _check_tools():
             if shutil.which(t) is None]
 
 
-def _essid_from_hex(h):
-    try:
-        return bytes.fromhex(h).decode("utf-8", errors="replace")
-    except Exception:
-        return ""
-
-
-def _types_label(types):
-    """Человекочитаемое описание типов хэша сети."""
-    parts = []
-    if "02" in types:
-        parts.append("EAPOL handshake")
-    if "01" in types:
-        parts.append("PMKID")
-    for t in sorted(types - {"01", "02"}):
-        parts.append(f"WPA*{t}")
-    return ", ".join(parts) if parts else "?"
-
-
 def _safe_name(essid, bssid):
     base = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in essid)[:32]
     base = base or "hidden"
     return f"{base}_{bssid.replace(':', '')}.hc22000"
-
-
-def _parse_hc22000(path):
-    """
-    Разбирает .hc22000. Возвращает {bssid: {"essid", "types": set, "lines": []}}.
-    Формат строки: WPA*<01|02>*MIC_или_PMKID*AP_MAC*CLIENT_MAC*ESSID_HEX*...
-      01 = PMKID, 02 = EAPOL (рукопожатие).
-    В файл попадают только валидные для hashcat хэши.
-    """
-    nets = {}
-    if not os.path.exists(path):
-        return nets
-    try:
-        with open(path, "r", errors="ignore") as f:
-            lines = [l.strip() for l in f if l.strip()]
-    except Exception:
-        return nets
-
-    for line in lines:
-        p = line.split("*")
-        if len(p) < 6 or p[0] != "WPA":
-            continue
-        htype = p[1]
-        ap = p[3].lower()
-        if len(ap) == 12 and all(c in "0123456789abcdef" for c in ap):
-            bssid = ":".join(ap[i:i + 2] for i in range(0, 12, 2))
-        else:
-            bssid = ap
-        essid = _essid_from_hex(p[5])
-
-        net = nets.setdefault(bssid, {"essid": essid, "types": set(), "lines": []})
-        net["types"].add(htype)
-        net["lines"].append(line)
-        if essid and not net["essid"]:
-            net["essid"] = essid
-    return nets
 
 
 def _ask_int(prompt, default, minimum=1):
