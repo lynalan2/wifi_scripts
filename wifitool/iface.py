@@ -94,6 +94,45 @@ def set_channel(interface, channel):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def reset_monitor(interface):
+    """
+    Сбрасывает залипший канал/бэнд (например, после атаки на 5 ГГц адаптер
+    мог застрять и не хопать на 2.4 ГГц). Цикл monitor через managed. Тихо.
+    """
+    q = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(["ip", "link", "set", interface, "down"], **q)
+        subprocess.run(["iw", "dev", interface, "set", "type", "managed"], **q)
+        subprocess.run(["iw", "dev", interface, "set", "type", "monitor"], **q)
+        subprocess.run(["ip", "link", "set", interface, "up"], **q)
+    except Exception:
+        pass
+
+
+def add_monitor_vif(base_iface, name=None):
+    """
+    Создаёт виртуальный monitor-интерфейс на том же радио, что base_iface.
+    Нужно для деаутентификации одним адаптером, пока на нём работает AP
+    (как делает airgeddon). Возвращает имя VIF или None, если драйвер не умеет.
+    """
+    name = name or f"{base_iface}mon"
+    r = subprocess.run(
+        ["iw", "dev", base_iface, "interface", "add", name, "type", "monitor"],
+        capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        return None
+    subprocess.run(["ip", "link", "set", name, "up"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return name
+
+
+def del_interface(name):
+    """Удаляет интерфейс (например, созданный add_monitor_vif). Тихо."""
+    subprocess.run(["iw", "dev", name, "del"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def set_monitor_mode(interface):
     """Переводит адаптер в monitor. True при успехе, False при ошибке."""
     if not interface_exists(interface):

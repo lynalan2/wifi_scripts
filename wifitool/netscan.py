@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from .terminal import find_terminal
+from .iface import reset_monitor
 from .constants import GREEN, RESET, AIRODUMP_BANDS
 
 
@@ -178,6 +179,10 @@ def scan_networks(interface, duration, work_dir):
     Запускает airodump-ng в отдельном окне терминала и следит за CSV.
     Ctrl+C или истечение duration — останавливает сканирование. Возвращает список сетей.
     """
+    # Сбрасываем возможный залипший канал/бэнд (например, после атаки на 5 ГГц),
+    # иначе airodump может перестать хопать на 2.4 ГГц.
+    reset_monitor(interface)
+
     work_dir = Path(work_dir)
     prefix = str(work_dir / "scan")
     csv_file = f"{prefix}-01.csv"
