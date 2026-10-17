@@ -16,63 +16,21 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from wifitool.system import check_root
+from wifitool.system import check_root, run, require_tools
 from wifitool.terminal import (
     find_terminal,
     launch_in_terminal as _launch_in_terminal,
     kill_group as _kill_group,
 )
+from wifitool.iface import (
+    get_interface_mode, set_interface_mode, ensure_monitor, restore_managed,
+)
+from wifitool.constants import TOOLS_HANDSHAKE
 
 # ============ Утилиты ============
 
 def check_tools():
-    missing = []
-    for tool in ("iw", "airodump-ng", "aireplay-ng", "aircrack-ng", "ip"):
-        if subprocess.run(["which", tool], capture_output=True).returncode != 0:
-            missing.append(tool)
-    if missing:
-        print(f"[-] Не найдены утилиты: {', '.join(missing)}")
-        sys.exit(1)
-
-
-def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True)
-
-
-def get_interface_mode(interface):
-    r = run(["iw", "dev", interface, "info"])
-    m = re.search(r"type\s+(\w+)", r.stdout)
-    return m.group(1) if m else "unknown"
-
-
-def set_interface_mode(interface, mode):
-    subprocess.run(["ip", "link", "set", interface, "down"], check=True)
-    subprocess.run(["iw", "dev", interface, "set", "type", mode], check=True)
-    subprocess.run(["ip", "link", "set", interface, "up"], check=True)
-
-
-def ensure_monitor(interface):
-    if get_interface_mode(interface).lower() == "monitor":
-        print(f"[+] {interface} уже в режиме monitor.")
-        return True
-    print(f"[*] Перевод {interface} в monitor")
-    try:
-        set_interface_mode(interface, "monitor")
-        print("[+] Готово.")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"[-] Не удалось переключить режим: {e}")
-        return False
-
-
-def restore_managed(interface):
-    try:
-        if get_interface_mode(interface).lower() == "monitor":
-            print(f"[*] Возвращаю {interface} в managed...")
-            set_interface_mode(interface, "managed")
-    except Exception:
-        pass
-
+    require_tools(TOOLS_HANDSHAKE)
 
 
 # ============ Сканирование ============
