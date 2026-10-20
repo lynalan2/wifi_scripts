@@ -53,6 +53,8 @@ AP_NETMASK = "255.255.255.0"
 AP_DHCP_START = "10.0.0.10"
 AP_DHCP_END = "10.0.0.100"
 PORTAL_PORT = 80
+UPSTREAM_DNS = "1.1.1.1"   # для sniffing-режимов (жертве нужен рабочий интернет)
+BEEF_PORT = 3000
 
 # ---- ANSI-цвета ----
 GREEN = "\033[92m"

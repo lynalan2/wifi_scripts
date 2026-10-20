@@ -43,6 +43,6 @@ FEATURES = [
             lambda interface: cracker_menu(), needs_monitor=False),
     # Evil Twin сам управляет режимами адаптера (monitor для скана, managed
     # для AP), поэтому needs_monitor=False.
-    Feature("6", "Атаки", "Evil Twin (поддельная точка + портал)",
+    Feature("6", "Атаки", "Evil Twin (меню режимов: AP / портал / sniffing)",
             evil_twin_flow, needs_monitor=False),
 ]
