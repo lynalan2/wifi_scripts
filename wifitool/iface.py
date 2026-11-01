@@ -10,6 +10,7 @@ import time
 import subprocess
 
 from .system import run
+from .i18n import t
 
 
 # ============ Информация об интерфейсе ============
@@ -58,7 +59,7 @@ def get_wifi_info(interface):
         ).stdout
 
         mode_match = re.search(r"type\s+(\w+)", dev)
-        mode = mode_match.group(1) if mode_match else "Неизвестно"
+        mode = mode_match.group(1) if mode_match else t("iface.unknown")
 
         phy_match = re.search(r"wiphy\s+(\d+)", dev)
         phy = phy_match.group(1) if phy_match else None
@@ -73,10 +74,10 @@ def get_wifi_info(interface):
             speeds = sorted(set(speeds))
             speed_str = f"{speeds[0]:g}-{speeds[-1]:g} Mbps"
         else:
-            speed_str = "Неизвестно"
+            speed_str = t("iface.unknown")
         return mode, speed_str
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return "Неизвестно", "Неизвестно"
+        return t("iface.unknown"), t("iface.unknown")
 
 
 # ============ Смена режима ============
@@ -136,28 +137,28 @@ def del_interface(name):
 def set_monitor_mode(interface):
     """Переводит адаптер в monitor. True при успехе, False при ошибке."""
     if not interface_exists(interface):
-        print(f"[-] Интерфейс {interface} не найден.")
+        print(t("iface.not_found", iface=interface))
         return False
 
     current = get_interface_mode(interface)
     if current.lower() == "monitor":
-        print(f"[+] {interface} уже в режиме monitor.")
+        print(t("iface.already_monitor", iface=interface))
         return True
 
     phy = get_interface_phy(interface)
-    print(f"[*] {interface} ({phy or 'phy?'}): переключаю {current} -> monitor")
+    print(t("iface.switching_monitor", iface=interface, phy=phy or "phy?", cur=current))
     try:
         set_interface_mode(interface, "monitor")
         time.sleep(1)
         new_mode = get_interface_mode(interface)
         if new_mode.lower() == "monitor":
-            print(f"[+] {interface} переведён в monitor.")
+            print(t("iface.now_monitor", iface=interface))
             return True
-        print(f"[-] Режим после переключения: {new_mode}. Ожидался monitor.")
-        print("[*] Драйвер адаптера может не поддерживать monitor mode.")
+        print(t("iface.mode_after", mode=new_mode))
+        print(t("iface.no_monitor_support"))
         return False
     except subprocess.CalledProcessError as e:
-        print(f"[-] Ошибка переключения: {e}")
+        print(t("iface.switch_error", e=e))
         return False
 
 
@@ -170,25 +171,25 @@ def set_managed_mode(interface):
     try:
         set_interface_mode(interface, "managed")
         time.sleep(1)
-        print(f"[+] {interface} возвращён в managed.")
+        print(t("iface.now_managed", iface=interface))
         return True
     except subprocess.CalledProcessError as e:
-        print(f"[-] Не удалось вернуть managed: {e}")
+        print(t("iface.managed_fail", e=e))
         return False
 
 
 def ensure_monitor(interface):
     """Гарантирует monitor (тихий вариант для автозапуска). True/False."""
     if get_interface_mode(interface).lower() == "monitor":
-        print(f"[+] {interface} уже в режиме monitor.")
+        print(t("iface.already_monitor", iface=interface))
         return True
-    print(f"[*] Перевод {interface} в monitor")
+    print(t("iface.to_monitor", iface=interface))
     try:
         set_interface_mode(interface, "monitor")
-        print("[+] Готово.")
+        print(t("iface.done"))
         return True
     except subprocess.CalledProcessError as e:
-        print(f"[-] Не удалось переключить режим: {e}")
+        print(t("iface.switch_fail", e=e))
         return False
 
 
@@ -196,7 +197,7 @@ def restore_managed(interface):
     """Если адаптер в monitor — вернуть в managed (без исключений)."""
     try:
         if get_interface_mode(interface).lower() == "monitor":
-            print(f"[*] Возвращаю {interface} в managed...")
+            print(t("iface.restoring_managed", iface=interface))
             set_interface_mode(interface, "managed")
     except Exception:
         pass
@@ -208,30 +209,30 @@ def get_name_mac_type_adapters():
     """Спрашивает пользователя, какой адаптер использовать. (имя, {mode, speed})."""
     ifaces = list_wifi_interfaces()
     if not ifaces:
-        print("[-] Не найдено ни одного Wi-Fi интерфейса (iw dev пуст).")
-        print("    Проверь: lsusb, rfkill list, dmesg | tail")
+        print(t("iface.none_found"))
+        print(t("iface.none_hint"))
         sys.exit(1)
 
     for iface in ifaces:
         subprocess.run(["ip", "link", "set", iface, "up"], capture_output=True)
 
-    print("\nДоступные Wi-Fi адаптеры:")
+    print(t("iface.available"))
     for i, iface in enumerate(ifaces, start=1):
         mode, speed = get_wifi_info(iface)
         print(f"  {i}. {iface}  ({mode}, {speed})")
 
     while True:
         try:
-            user_input = input("\nВведите номер адаптера (0 — выход): ").strip()
+            user_input = input(t("iface.ask_number")).strip()
             if user_input == '0':
                 sys.exit(0)
             idx = int(user_input) - 1
             if 0 <= idx < len(ifaces):
                 chosen = ifaces[idx]
                 break
-            print(f"Ошибка: введите число от 1 до {len(ifaces)}.")
+            print(t("iface.err_range", n=len(ifaces)))
         except ValueError:
-            print("Ошибка: нужно ввести целое число.")
+            print(t("iface.err_int"))
 
     mode, speed = get_wifi_info(chosen)
     return chosen, {"mode": mode, "speed": speed}

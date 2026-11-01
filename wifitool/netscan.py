@@ -10,6 +10,7 @@ from pathlib import Path
 from .terminal import find_terminal
 from .iface import reset_monitor
 from .constants import GREEN, RESET, AIRODUMP_BANDS
+from .i18n import t
 
 
 def parse_airodump_csv(csv_path):
@@ -109,19 +110,19 @@ def _power_to_int(p):
 
 def display_networks(networks):
     if not networks:
-        print("[-] Сети не найдены.")
+        print(t("scan.none"))
         return
 
     # Слабые сверху (-90), сильные снизу (-40)
     networks.sort(key=lambda n: _power_to_int(n['power']))
 
     print("\n{:<4} {:<20} {:<4} {:<6} {:<30} {:<12}".format(
-        "№", "BSSID", "Ch", "PWR", "ESSID", "Шифрование"
+        "№", "BSSID", "Ch", "PWR", "ESSID", t("scan.col_enc")
     ))
     print("-" * 90)
 
     for i, net in enumerate(networks, 1):
-        essid = net['essid'] if net['essid'] else '<скрытая>'
+        essid = net['essid'] if net['essid'] else t("common.hidden")
         privacy = net['privacy'] if net['privacy'] else 'Open'
         line = "{:<4} {:<20} {:<4} {:<6} {:<30} {:<12}".format(
             i, net['bssid'], net['channel'], net['power'], essid[:28], privacy
@@ -133,9 +134,9 @@ def display_networks(networks):
 
 
 def ask_scan_duration():
-    print("\nВремя сканирования:")
-    print("  Enter или 0 — бесконечно (Ctrl+C для остановки) [по умолчанию]")
-    print("  Или число секунд")
+    print(t("scan.duration_title"))
+    print(t("scan.duration_inf"))
+    print(t("scan.duration_sec"))
     value = input()
     if value == "":
         return None
@@ -143,7 +144,7 @@ def ask_scan_duration():
         n = int(value)
         return None if n <= 0 else n
     except ValueError:
-        print("[-] Некорректно. Использую бесконечный режим.")
+        print(t("scan.duration_bad"))
         return None
 
 
@@ -153,25 +154,25 @@ def choose_network(networks):
     while True:
         try:
             choice = input(
-                f"\nВыберите номер сети (1-{len(networks)}, 0 — отмена): "
+                t("scan.pick", n=len(networks))
             ).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\n[*] Отменено.")
+            print(t("common.cancelled"))
             return None
         if choice == "":
-            print("Пустой ввод. Введите число или 0 для отмены.")
+            print(t("scan.empty_input"))
             continue
         if choice == "0":
-            print("[*] Отменено.")
+            print(t("common.cancelled"))
             return None
         try:
             idx = int(choice) - 1
         except ValueError:
-            print(f"Ошибка: нужно целое число от 0 до {len(networks)}.")
+            print(t("scan.err_0n", n=len(networks)))
             continue
         if 0 <= idx < len(networks):
             return networks[idx]
-        print(f"Ошибка: число должно быть от 1 до {len(networks)}.")
+        print(t("scan.err_1n", n=len(networks)))
 
 
 def scan_networks(interface, duration, work_dir):
@@ -201,7 +202,7 @@ def scan_networks(interface, duration, work_dir):
         script_path = work_dir / "scan.sh"
         script_path.write_text(
             "#!/bin/bash\n"
-            "echo 'Сканирование 2.4 + 5 ГГц. Ctrl+C — остановить.'\n"
+            f"echo '{t('scan.win_title')}'\n"
             "echo\n"
             f"{airodump_cmd}\n"
         )
@@ -215,11 +216,11 @@ def scan_networks(interface, duration, work_dir):
         try:
             term_proc = subprocess.Popen(launch, preexec_fn=os.setsid)
         except Exception as e:
-            print(f"[!] Не удалось открыть {term_name}: {e}")
+            print(t("scan.term_fail", term=term_name, e=e))
             term_proc = None
 
     if term_proc is None:
-        print("[!] Терминал не найден, запускаю сканирование здесь же.")
+        print(t("scan.no_term"))
         cmd = ["airodump-ng", "--band", AIRODUMP_BANDS,
                "--write", prefix, "--output-format", "csv",
                "--write-interval", "1", interface]
@@ -228,9 +229,9 @@ def scan_networks(interface, duration, work_dir):
         )
 
     if duration is None:
-        print("[*] Сканирование... Ctrl+C — остановить.")
+        print(t("scan.running_inf"))
     else:
-        print(f"[*] Сканирование {duration} сек (Ctrl+C — остановить).")
+        print(t("scan.running_sec", d=duration))
 
     try:
         if duration is None:
@@ -241,10 +242,10 @@ def scan_networks(interface, duration, work_dir):
                 if term_proc.poll() is not None:
                     break
                 time.sleep(1)
-                print(f"\r[*] Осталось: {remaining:3d} сек", end='', flush=True)
+                print(t("scan.remaining", r=remaining), end='', flush=True)
             print()
     except KeyboardInterrupt:
-        print("\n[*] Остановлено.")
+        print(t("scan.stopped"))
     finally:
         if term_proc.poll() is None:
             try:
@@ -258,5 +259,5 @@ def scan_networks(interface, duration, work_dir):
         time.sleep(1)   # пауза, чтобы CSV успел зафлашиться на диск
 
     networks = parse_airodump_csv(csv_file)
-    print(f"[+] Итого найдено сетей: {len(networks)}")
+    print(t("scan.total", n=len(networks)))
     return networks
