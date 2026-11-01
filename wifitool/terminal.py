@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from .constants import TERMINALS
+from .i18n import t
 
 
 def sh_quote(s):
@@ -44,7 +45,7 @@ def launch_in_terminal(term_name, term_cmd, script_path):
     try:
         return subprocess.Popen(launch, preexec_fn=os.setsid)
     except Exception as e:
-        print(f"[!] Не удалось открыть {term_name}: {e}")
+        print(t("common.term_open_fail", term=term_name, e=e))
         return None
 
 

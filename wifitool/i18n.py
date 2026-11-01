@@ -111,6 +111,8 @@ MESSAGES = {
     "common.yn_prompt": ("Enter Y or N.", "Введите Y или N."),
     "common.need_root": ("[-] Run with sudo.", "[-] Запустите с sudo."),
     "common.tools_missing": ("[-] Missing tools: {tools}", "[-] Не найдены утилиты: {tools}"),
+    "common.term_open_fail": ("[!] Could not open {term}: {e}",
+                              "[!] Не удалось открыть {term}: {e}"),
 
     # ---- главное меню / app ----
     "app.title": ("WiFi Tool", "WiFi Tool"),
