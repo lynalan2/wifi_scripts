@@ -1,9 +1,9 @@
 """Реестр действий главного меню — ЕДИНАЯ точка расширения.
 
-Чтобы добавить новую функцию (например, evil twin):
-  1. написать модуль wifitool/evil_twin.py с функцией evil_twin_flow(interface);
-  2. зарегистрировать её здесь одной строкой в FEATURES (см. пример внизу).
-Больше ничего в main.py/app.py править не нужно — меню построится само.
+Чтобы добавить новую функцию:
+  1. написать модуль wifitool/<feature>.py с функцией <feature>_flow(interface);
+  2. зарегистрировать её здесь одной строкой в FEATURES.
+group_key / label_key — ключи из i18n.MESSAGES (меню строится и переводится само).
 """
 
 from dataclasses import dataclass
@@ -17,32 +17,19 @@ from .evil_twin import evil_twin_flow
 
 @dataclass
 class Feature:
-    """Пункт меню-действие.
-
-    key          — цифра/код пункта (уникальный);
-    group        — заголовок секции в меню («Захват», «Взлом», ...);
-    label        — текст пункта;
-    run          — функция вида run(interface);
-    needs_monitor— требовать ли режим monitor перед запуском.
-    """
-    key: str
-    group: str
-    label: str
-    run: Callable[[str], None]
-    needs_monitor: bool = False
+    key: str                     # цифра/код пункта (уникальный)
+    group_key: str               # i18n-ключ заголовка секции
+    label_key: str               # i18n-ключ текста пункта
+    run: Callable[[str], None]   # функция вида run(interface)
+    needs_monitor: bool = False  # требовать ли monitor перед запуском
 
 
-# Реестр функций главного меню. Порядок = порядок в меню.
-# Ключи 1,2 зарезервированы под управление адаптером, 0 и 9 — служебные.
+# Ключи 1,2 — управление адаптером; 0,8,9 — служебные.
 FEATURES = [
-    Feature("3", "Захват", "Анализ сети (деаутентификация)",
-            handshake_flow, needs_monitor=True),
-    Feature("4", "Захват", "Захват handshake (hcxdumptool)",
-            hcxdumptool_flow, needs_monitor=True),
-    Feature("5", "Взлом", "Взлом пароля",
+    Feature("3", "grp.capture", "feat.handshake", handshake_flow, needs_monitor=True),
+    Feature("4", "grp.capture", "feat.hcxdump", hcxdumptool_flow, needs_monitor=True),
+    Feature("5", "grp.crack", "feat.crack",
             lambda interface: cracker_menu(), needs_monitor=False),
-    # Evil Twin сам управляет режимами адаптера (monitor для скана, managed
-    # для AP), поэтому needs_monitor=False.
-    Feature("6", "Атаки", "Evil Twin (меню режимов: AP / портал / sniffing)",
-            evil_twin_flow, needs_monitor=False),
+    # Evil Twin сам управляет режимами адаптера, поэтому needs_monitor=False.
+    Feature("6", "grp.attacks", "feat.eviltwin", evil_twin_flow, needs_monitor=False),
 ]

@@ -1,4 +1,4 @@
-"""Главный цикл программы: выбор адаптера и построение меню из реестра FEATURES."""
+"""Главный цикл программы: выбор языка, адаптера и построение меню из FEATURES."""
 
 import time
 
@@ -6,6 +6,7 @@ from . import iface
 from .system import check_root
 from .ui import clear_screen, pause, ask_yes_no, print_title
 from .menu import FEATURES
+from .i18n import t, saved_lang, choose_language_interactive
 
 
 def print_header(interface):
@@ -15,34 +16,35 @@ def print_header(interface):
     mac = iface.get_mac(interface)
     speed = iface.get_wifi_info(interface)[1]
 
-    print_title("WiFi Tool")
-    print(f"  Адаптер:  {interface}")
-    print(f"  PHY:      {phy}")
-    print(f"  Режим:    {mode}")
-    print(f"  Скорость: {speed}")
-    print(f"  MAC:      {mac}")
+    print_title(t("app.title"))
+    print(t("app.adapter", v=interface))
+    print(t("app.phy", v=phy))
+    print(t("app.mode", v=mode))
+    print(t("app.speed", v=speed))
+    print(t("app.mac", v=mac))
     print("=" * 62)
 
 
 def _print_menu(interface):
     print_header(interface)
     print()
-    print("  Адаптер:")
-    print("    1. Включить режим monitor")
-    print("    2. Включить режим managed")
+    print(t("app.grp_adapter"))
+    print(t("app.mon_on"))
+    print(t("app.managed_on"))
 
     # Секции-фичи из реестра (группируем по group в порядке появления).
     last_group = None
     for feat in FEATURES:
-        if feat.group != last_group:
+        if feat.group_key != last_group:
             print()
-            print(f"  {feat.group}:")
-            last_group = feat.group
-        print(f"    {feat.key}. {feat.label}")
+            print(f"  {t(feat.group_key)}:")
+            last_group = feat.group_key
+        print(f"    {feat.key}. {t(feat.label_key)}")
 
     print()
-    print("    0. Сменить адаптер")
-    print("    9. Выход")
+    print(t("app.change_adapter"))
+    print(t("app.language"))
+    print(t("app.exit"))
     print()
 
 
@@ -52,7 +54,7 @@ def main_menu(interface):
     while True:
         clear_screen()
         _print_menu(interface)
-        choice = input("Выбор: ").strip()
+        choice = input(t("common.choice")).strip()
 
         if choice == '1':
             iface.set_monitor_mode(interface)
@@ -60,6 +62,8 @@ def main_menu(interface):
         elif choice == '2':
             iface.set_managed_mode(interface)
             pause()
+        elif choice == '8':
+            choose_language_interactive()
         elif choice == '0':
             return 'change'
         elif choice == '9':
@@ -67,42 +71,46 @@ def main_menu(interface):
         elif choice in features:
             feat = features[choice]
             if feat.needs_monitor and iface.get_interface_mode(interface).lower() != "monitor":
-                print("\n[-] Сначала включите режим monitor (пункт 1).")
+                print(t("app.need_monitor"))
                 pause()
                 continue
             try:
                 feat.run(interface)
             except KeyboardInterrupt:
-                print("\n[*] Прервано.")
+                print(t("common.interrupted"))
             pause()
         else:
-            print("Неизвестный пункт.")
-            time.sleep(1)
+            print(t("common.unknown_item"))
+            time.sleep(0.5)
 
 
 def main():
     check_root()
+    # Первый запуск — спросить язык; дальше берём сохранённый.
+    if saved_lang() is None:
+        choose_language_interactive(first_time=True)
+
     while True:
         clear_screen()
-        print_title("WiFi Tool")
+        print_title(t("app.title"))
         try:
             interface, _info = iface.get_name_mac_type_adapters()
         except SystemExit:
             return
         except KeyboardInterrupt:
-            print("\nВыход.")
+            print(t("app.exit_word"))
             return
 
         if not iface.interface_exists(interface):
-            print(f"[-] Интерфейс {interface} пропал. Выберите снова.")
+            print(t("app.iface_gone", iface=interface))
             pause()
             continue
 
         if main_menu(interface) == 'exit':
             if iface.get_interface_mode(interface).lower() == "monitor":
-                if ask_yes_no(f"\n[?] Вернуть {interface} в режим managed перед выходом?"):
-                    print("\n[*] Возвращаю адаптер в managed...")
+                if ask_yes_no(t("app.ask_restore", iface=interface)):
+                    print(t("app.restoring"))
                     iface.set_managed_mode(interface)
                 else:
-                    print("[*] Адаптер оставлен в monitor.")
+                    print(t("app.left_monitor"))
             return

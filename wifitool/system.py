@@ -5,24 +5,26 @@ import sys
 import shutil
 import subprocess
 
+from .i18n import t
+
 
 def check_root():
     """Прерывает программу, если запущена не от root."""
     if os.geteuid() != 0:
-        print("[-] Запустите с sudo.")
+        print(t("common.need_root"))
         sys.exit(1)
 
 
 def missing_tools(tools):
     """Возвращает список утилит из `tools`, которых нет в PATH."""
-    return [t for t in tools if shutil.which(t) is None]
+    return [tool for tool in tools if shutil.which(tool) is None]
 
 
 def require_tools(tools):
     """Прерывает программу, если каких-то утилит из `tools` нет."""
     missing = missing_tools(tools)
     if missing:
-        print(f"[-] Не найдены утилиты: {', '.join(missing)}")
+        print(t("common.tools_missing", tools=", ".join(missing)))
         sys.exit(1)
 
 
