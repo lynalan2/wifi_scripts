@@ -21,6 +21,8 @@ import shutil
 from pathlib import Path
 
 from wifitool.hashfile import parse_hc22000 as _parse_hc22000, types_label as _types_label
+from wifitool.i18n import t
+from wifitool.system import missing_tools
 
 
 # ============ Утилиты ============
@@ -50,27 +52,27 @@ def _ask_int(prompt, default, minimum=1):
 
 def _final_summary(seen, saved, dup_skips):
     print(f"\n{'=' * 60}")
-    print("  ИТОГ")
+    print(t("hcx.summary"))
     print(f"{'=' * 60}")
     if not seen:
-        print("[-] Валидный для hashcat handshake/PMKID не пойман ни в одном прогоне.")
+        print(t("hcx.sum_none"))
         return
 
-    print(f"[+] Сетей с валидным для hashcat хэшем: {len(seen)}")
-    print(f"[+] Сохранено файлов: {len(saved)}  |  повторных (та же сеть) пропущено: {dup_skips}")
+    print(t("hcx.sum_nets", n=len(seen)))
+    print(t("hcx.sum_saved", s=len(saved), d=dup_skips))
     print()
     print("{:<22} {:<18} {:<20} {:<8} {}".format(
-        "ESSID", "BSSID", "Тип", "Прогоны", "Файл"))
+        "ESSID", "BSSID", t("hcx.col_type"), t("hcx.col_runs"), t("hcx.col_file")))
     print("-" * 100)
     for bssid, rec in seen.items():
-        essid = (rec["essid"] or "<скрытая>")[:20]
+        essid = (rec["essid"] or t("common.hidden"))[:20]
         label = _types_label(rec["types"])[:18]
         runs_str = ",".join(str(n) for n in sorted(rec["runs"]))
-        path = str(saved[bssid]["path"]) if bssid in saved else "(не сохранён)"
+        path = str(saved[bssid]["path"]) if bssid in saved else t("hcx.not_saved")
         print("{:<22} {:<18} {:<20} {:<8} {}".format(
             essid, bssid, label, runs_str, path))
     print()
-    print("[*] Готовые .hc22000 можно сразу перебирать: hashcat -m 22000 <файл> <словарь>")
+    print(t("hcx.hint"))
 
 
 # ============ Основной сценарий ============
@@ -78,17 +80,17 @@ def _final_summary(seen, saved, dup_skips):
 def hcxdumptool_flow(interface):
     missing = _check_tools()
     if missing:
-        print(f"[-] Не найдены утилиты: {', '.join(missing)}")
-        print("    Установите: sudo apt install hcxdumptool hcxtools")
+        print(t("common.tools_missing", tools=", ".join(missing)))
+        print(t("hcx.install"))
         return
 
-    print("\n=== hcxdumptool: захват handshake/PMKID ===")
-    runs = _ask_int("Сколько раз запустить сканирование? (Enter = 1): ", 1)
-    dur = _ask_int("Длительность одного прогона, сек (Enter = 60): ", 60)
+    print(t("hcx.title"))
+    runs = _ask_int(t("hcx.ask_runs"), 1)
+    dur = _ask_int(t("hcx.ask_dur"), 60)
 
-    print(f"\n[*] Интерфейс: {interface}")
-    print(f"[*] Прогонов:  {runs}")
-    print(f"[*] Команда:   timeout {dur} hcxdumptool -i {interface} -w <capture>.pcapng --rds=1")
+    print(t("hcx.iface", v=interface))
+    print(t("hcx.runs", v=runs))
+    print(t("hcx.cmd", d=dur, i=interface))
 
     # Готовые .hc22000 сохраняем туда, откуда запущена программа.
     save_dir = Path.cwd()
@@ -101,7 +103,7 @@ def hcxdumptool_flow(interface):
     try:
         for i in range(1, runs + 1):
             print(f"\n{'=' * 60}")
-            print(f"  Прогон {i}/{runs}  (timeout {dur} сек, Ctrl+C — прервать прогон)")
+            print(t("hcx.run_hdr", i=i, n=runs, d=dur))
             print(f"{'=' * 60}")
 
             capture = tmp_dir / f"capture_{i}.pcapng"
@@ -113,10 +115,10 @@ def hcxdumptool_flow(interface):
                      "-i", interface, "-w", str(capture), "--rds=1"]
                 )
             except KeyboardInterrupt:
-                print("\n[*] Прогон прерван пользователем.")
+                print(t("hcx.run_interrupted"))
 
             if not capture.exists() or capture.stat().st_size == 0:
-                print(f"[-] Прогон {i}: ничего не захвачено (pcapng пуст).")
+                print(t("hcx.empty", i=i))
                 continue
 
             # hcxpcapngtool отфильтровывает всё, что непригодно для hashcat.
@@ -128,10 +130,10 @@ def hcxdumptool_flow(interface):
             nets = _parse_hc22000(hc_out)
 
             if not nets:
-                print(f"[-] Прогон {i}: валидных для hashcat handshake/PMKID не найдено.")
+                print(t("hcx.none_valid", i=i))
                 continue
 
-            print(f"[+] Прогон {i}: сетей с валидным хэшем — {len(nets)}:")
+            print(t("hcx.run_found", i=i, n=len(nets)))
             for bssid, info in nets.items():
                 rec = seen.setdefault(
                     bssid, {"essid": info["essid"], "types": set(), "runs": set()})
@@ -140,29 +142,28 @@ def hcxdumptool_flow(interface):
                 if info["essid"] and not rec["essid"]:
                     rec["essid"] = info["essid"]
 
-                essid = info["essid"] or "<скрытая>"
+                essid = info["essid"] or t("common.hidden")
                 label = _types_label(info["types"])
 
                 if bssid in saved:
                     dup_skips += 1
-                    print(f"    - {essid} [{bssid}] {label}: "
-                          f"уже сохранён (прогон {saved[bssid]['run']}), пропускаю.")
+                    print(t("hcx.dup", essid=essid, bssid=bssid, label=label, run=saved[bssid]["run"]))
                     continue
 
                 dest = save_dir / _safe_name(essid, bssid)
                 try:
                     dest.write_text("\n".join(info["lines"]) + "\n")
                 except Exception as e:
-                    print(f"    - {essid} [{bssid}] {label}: [-] не сохранить: {e}")
+                    print(t("hcx.save_fail", essid=essid, bssid=bssid, label=label, e=e))
                     continue
                 saved[bssid] = {"essid": essid, "path": dest,
                                 "run": i, "types": set(info["types"])}
-                print(f"    - {essid} [{bssid}] {label}: СОХРАНЁН -> {dest}")
+                print(t("hcx.saved", essid=essid, bssid=bssid, label=label, dest=dest))
 
         _final_summary(seen, saved, dup_skips)
 
     except KeyboardInterrupt:
-        print("\n[*] Прервано пользователем.")
+        print(t("common.interrupted"))
         _final_summary(seen, saved, dup_skips)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
