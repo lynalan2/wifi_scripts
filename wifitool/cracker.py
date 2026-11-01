@@ -16,7 +16,8 @@ from wifitool.constants import (
     BASE_DIR, DATA_DIR, STATE_FILE, WORDLISTS_DIR,
     CAPTURES_DIR, SESSIONS_DIR, ROCKYOU_URL,
 )
-from wifitool.terminal import find_terminal, launch_in_terminal, kill_group
+from wifitool.terminal import find_terminal, launch_in_terminal, kill_group, sh_quote
+from wifitool.i18n import t
 from wifitool.hashfile import (
     read_hashes as _read_hashes,
     decode_hashcat_plain as _decode_hashcat_plain,
@@ -66,29 +67,29 @@ def save_state(state):
 # ============ Управление cap ============
 
 def add_cap(state):
-    print("\nВведите путь к .cap файлу:")
-    path = input("Путь: ").strip()
+    print(t("crack.ask_cap"))
+    path = input(t("crack.path")).strip()
     if not path:
         return
     p = Path(path).expanduser()
     if not p.exists():
-        print(f"[-] Файл не найден: {p}")
+        print(t("crack.file_not_found", p=p))
         return
     if p.suffix.lower() != ".cap":
-        print("[-] Ожидается файл с расширением .cap")
+        print(t("crack.expect_cap"))
         return
 
-    name = input("Название (Enter — имя файла): ").strip() or p.stem
+    name = input(t("crack.ask_name")).strip() or p.stem
 
     # Конвертируем в .hc22000
     hc22000 = CAPTURES_DIR / f"{p.stem}.hc22000"
-    print(f"[*] Конвертирую {p.name} -> {hc22000.name} ...")
+    print(t("crack.converting", a=p.name, b=hc22000.name))
     r = subprocess.run(
         ["hcxpcapngtool", "-o", str(hc22000), str(p)],
         capture_output=True, text=True
     )
     if r.returncode != 0 or not hc22000.exists():
-        print("[-] Ошибка конвертации:")
+        print(t("crack.conv_err"))
         print(r.stderr or r.stdout)
         return
 
@@ -101,7 +102,7 @@ def add_cap(state):
         "cracked": False,
     })
     save_state(state)
-    print(f"[+] Добавлено: {name}")
+    print(t("crack.added", name=name))
 
 
 def _unique_hc_path(name):
@@ -114,29 +115,29 @@ def _unique_hc_path(name):
 
 
 def add_hc22000(state):
-    path = input("\nПуть к .hc22000 файлу: ").strip()
+    path = input(t("crack.ask_hc")).strip()
     if not path:
         return
     p = Path(path).expanduser()
     if not p.exists():
-        print(f"[-] Файл не найден: {p}")
+        print(t("crack.file_not_found", p=p))
         return
     if p.suffix.lower() != ".hc22000":
-        print("[-] Ожидается файл с расширением .hc22000")
+        print(t("crack.expect_hc"))
         return
 
     lines = _read_hashes(p)
     if not any(l.startswith("WPA*") for l in lines):
-        print("[-] Файл не похож на hc22000 (нет строк WPA*...).")
+        print(t("crack.not_hc"))
         return
 
-    name = input("Название (Enter — имя файла): ").strip() or p.stem
+    name = input(t("crack.ask_name")).strip() or p.stem
     init_dirs()
     dest = _unique_hc_path(name)
     try:
         shutil.copy2(p, dest)
     except Exception as e:
-        print(f"[-] Не удалось скопировать: {e}")
+        print(t("crack.copy_fail", e=e))
         return
 
     state["caps"].append({
@@ -148,17 +149,17 @@ def add_hc22000(state):
         "cracked": False,
     })
     save_state(state)
-    print(f"[+] Добавлено: {name}  ->  {dest.name}")
+    print(t("crack.added_as", name=name, dest=dest.name))
 
 
 def remove_cap(state):
     if not state["caps"]:
-        print("[-] Список cap пуст.")
+        print(t("crack.cap_empty"))
         return
     for i, c in enumerate(state["caps"], 1):
         print(f"  {i}. {c['name']}  [{c['path']}]")
     try:
-        idx = int(input("Номер для удаления (0 — отмена): ").strip()) - 1
+        idx = int(input(t("crack.del_prompt")).strip()) - 1
     except ValueError:
         return
     if 0 <= idx < len(state["caps"]):
@@ -169,63 +170,64 @@ def remove_cap(state):
         except Exception:
             pass
         save_state(state)
-        print(f"[+] Удалено: {c['name']}")
+        print(t("crack.deleted", name=c["name"]))
 
 
 def list_caps(state):
     if not state["caps"]:
-        print("[-] Список cap пуст.")
+        print(t("crack.cap_empty"))
         return
     print("\n{:<4} {:<20} {:<10} {:<8} {}".format(
-        "№", "Название", "Прогресс", "Взломан", "Путь"
+        "№", t("crack.col_name"), t("crack.col_progress"),
+        t("crack.col_cracked"), t("crack.col_path")
     ))
     print("-" * 90)
     for i, c in enumerate(state["caps"], 1):
         print("{:<4} {:<20} {:<10} {:<8} {}".format(
             i, c["name"][:18], f"{c.get('progress', 0)}%",
-            "да" if c.get("cracked") else "нет", c["path"]
+            t("crack.yes") if c.get("cracked") else t("crack.no"), c["path"]
         ))
 
 
 # ============ Управление словарями ============
 
 def add_wordlist(state):
-    print("\nВведите путь к словарю:")
-    path = input("Путь: ").strip()
+    print(t("crack.ask_wl"))
+    path = input(t("crack.path")).strip()
     if not path:
         return
     p = Path(path).expanduser()
     if not p.exists():
-        print(f"[-] Файл не найден: {p}")
+        print(t("crack.file_not_found", p=p))
         return
-    name = input("Название (Enter — имя файла): ").strip() or p.stem
+    name = input(t("crack.ask_name")).strip() or p.stem
     state["wordlists"].append({"path": str(p.resolve()), "name": name})
     save_state(state)
-    print(f"[+] Добавлен словарь: {name}")
+    print(t("crack.wl_added", name=name))
 
 
 def remove_wordlist(state):
     if not state["wordlists"]:
-        print("[-] Список словарей пуст.")
+        print(t("crack.wl_empty"))
         return
     for i, w in enumerate(state["wordlists"], 1):
         print(f"  {i}. {w['name']}  [{w['path']}]")
     try:
-        idx = int(input("Номер для удаления (0 — отмена): ").strip()) - 1
+        idx = int(input(t("crack.del_prompt")).strip()) - 1
     except ValueError:
         return
     if 0 <= idx < len(state["wordlists"]):
         w = state["wordlists"].pop(idx)
         save_state(state)
-        print(f"[+] Удалён словарь: {w['name']}")
+        print(t("crack.wl_deleted", name=w["name"]))
 
 
 def list_wordlists(state):
     if not state["wordlists"]:
-        print("[-] Список словарей пуст.")
-        print(f"[*] Положите словарь в {WORDLISTS_DIR} и добавьте его через меню.")
+        print(t("crack.wl_empty"))
+        print(t("crack.wl_hint", dir=WORDLISTS_DIR))
         return
-    print("\n{:<4} {:<20} {}".format("№", "Название", "Путь"))
+    print("\n{:<4} {:<20} {}".format("№", t("crack.col_name"), t("crack.col_path")))
     print("-" * 70)
     for i, w in enumerate(state["wordlists"], 1):
         print("{:<4} {:<20} {}".format(i, w["name"][:18], w["path"]))
@@ -235,23 +237,23 @@ def ensure_default_wordlist(state):
     """Если словарей нет — предлагает скачать rockyou."""
     if state["wordlists"]:
         return
-    print("\n[!] Нет ни одного словаря.")
-    ans = input("Скачать стандартный rockyou.txt? (Y/n): ").strip().lower()
+    print(t("crack.no_wl_title"))
+    ans = input(t("crack.ask_rockyou")).strip().lower()
     if ans == 'n':
         return
     dest = WORDLISTS_DIR / "rockyou.txt"
     if not dest.exists():
-        print("[*] Скачиваю rockyou.txt (это может занять время)...")
+        print(t("crack.downloading"))
         r = subprocess.run(
             ["wget", "-q", "-O", str(dest), ROCKYOU_URL],
             capture_output=True, text=True
         )
         if r.returncode != 0 or not dest.exists():
-            print("[-] Не удалось скачать. Добавьте словарь вручную.")
+            print(t("crack.dl_fail"))
             return
     state["wordlists"].append({"path": str(dest), "name": "rockyou"})
     save_state(state)
-    print(f"[+] Добавлен rockyou: {dest}")
+    print(t("crack.rockyou_added", dest=dest))
 
 
 # ============ Сессии и прогресс ============
@@ -276,9 +278,10 @@ def _parse_progress(log_file):
 def list_sessions(state):
     sessions = [c for c in state["caps"] if c.get("session") and not c.get("cracked")]
     if not sessions:
-        print("[-] Незавершённых сессий нет.")
+        print(t("crack.no_sessions"))
         return
-    print("\n{:<4} {:<20} {:<10} {}".format("№", "Название", "Прогресс", "Сессия"))
+    print("\n{:<4} {:<20} {:<10} {}".format(
+        "№", t("crack.col_name"), t("crack.col_progress"), t("crack.col_session")))
     print("-" * 70)
     for i, c in enumerate(sessions, 1):
         print("{:<4} {:<20} {:<10} {}".format(
@@ -290,24 +293,24 @@ def list_sessions(state):
 
 def run_cracking(state):
     if not state["caps"]:
-        print("[-] Нет cap-файлов. Сначала добавьте.")
+        print(t("crack.no_caps"))
         return
     if not state["wordlists"]:
-        print("[-] Нет словарей. Сначала добавьте.")
+        print(t("crack.no_wls"))
         return
 
     # выбор cap
-    print("\nВыберите cap для взлома:")
+    print(t("crack.pick_cap"))
     for i, c in enumerate(state["caps"], 1):
         if c.get("cracked"):
-            status = "✓ взломан"
+            status = t("crack.st_cracked")
         elif c.get("progress", 0) >= 100:
-            status = "словарь исчерпан"
+            status = t("crack.st_exhausted")
         else:
             status = f"{c.get('progress', 0)}%"
         print(f"  {i}. {c['name']}  [{status}]")
     try:
-        idx = int(input("Номер (0 — отмена): ").strip()) - 1
+        idx = int(input(t("crack.num_prompt")).strip()) - 1
     except ValueError:
         return
     if not (0 <= idx < len(state["caps"])):
@@ -315,15 +318,15 @@ def run_cracking(state):
     cap = state["caps"][idx]
 
     if cap.get("cracked"):
-        print("[*] Этот cap уже взломан. Смотрите результаты в меню (пункт 10).")
+        print(t("crack.already"))
         return
 
     # выбор словаря
-    print("\nВыберите словарь:")
+    print(t("crack.pick_wl"))
     for i, w in enumerate(state["wordlists"], 1):
         print(f"  {i}. {w['name']}")
     try:
-        widx = int(input("Номер (0 — отмена): ").strip()) - 1
+        widx = int(input(t("crack.num_prompt")).strip()) - 1
     except ValueError:
         return
     if not (0 <= widx < len(state["wordlists"])):
@@ -375,22 +378,22 @@ def run_cracking(state):
     # Возобновляемся только если прогресс есть И restore-файл реально на месте.
     if cap.get("progress", 0) > 0 and restore_file.exists():
         hashcat_cmd = f'{common}--restore'
-        print(f"[*] Возобновляю сессию {session_name} (было {cap['progress']}%)")
+        print(t("crack.resume", s=session_name, p=cap["progress"]))
     else:
         if cap.get("progress", 0) > 0:
-            print("[!] restore-файл не найден — запускаю сессию заново.")
+            print(t("crack.no_restore"))
             cap["progress"] = 0
         hashcat_cmd = f'{common}"{cap["hc22000"]}" "{wordlist["path"]}"'
-        print(f"[*] Новая сессия {session_name}")
+        print(t("crack.new_session", s=session_name))
 
     # --- bash-обёртка ---
     script_path = DATA_DIR / f"crack_{session_name}.sh"
     script_path.write_text(
         "#!/bin/bash\n"
-        f"echo '=== Взлом: {cap['name']} ==='\n"
-        f"echo 'Сессия:  {session_name}'\n"
-        f"echo 'Словарь: {wordlist['name']}'\n"
-        "echo 'Ctrl+C в этом окне — остановить (сессия сохранится).'\n"
+        f"echo {sh_quote(t('crack.win_title', name=cap['name']))}\n"
+        f"echo {sh_quote(t('crack.win_session', s=session_name))}\n"
+        f"echo {sh_quote(t('crack.win_wl', w=wordlist['name']))}\n"
+        f"echo {sh_quote(t('crack.win_stop'))}\n"
         "echo\n"
         f"cd {DATA_DIR}\n"
         # tee: вывод в окно + в файл. -u чтобы не буферизировало
@@ -400,15 +403,15 @@ def run_cracking(state):
 
     term_name, term_cmd = find_terminal()
     if term_name is None:
-        print("[-] Терминал не найден. Установите xterm: sudo apt install xterm")
+        print(t("crack.no_term"))
         return
 
     proc = launch_in_terminal(term_name, term_cmd, script_path)
     if proc is None:
         return
 
-    print(f"[*] Взлом запущен в отдельном окне ({term_name}).")
-    print("[*] Слежу за прогрессом... (Ctrl+C здесь — остановить)")
+    print(t("crack.started", term=term_name))
+    print(t("crack.watching"))
 
     try:
         while proc.poll() is None:
@@ -417,13 +420,13 @@ def run_cracking(state):
             if new_p > cap.get("progress", 0):
                 cap["progress"] = new_p
             if _check_cracked(state, cap, out_file):
-                print(f"\n[+] Пароль найден для {cap['name']}!")
+                print(t("crack.pw_found", name=cap["name"]))
                 save_state(state)
                 kill_group(proc)
                 break
-            print(f"\r[*] Прогресс: {cap['progress']:3d}%", end="", flush=True)
+            print(t("crack.progress", p=cap["progress"]), end="", flush=True)
     except KeyboardInterrupt:
-        print("\n[*] Остановка взлома...")
+        print(t("crack.stopping"))
     finally:
         # финальное обновление перед выходом — вдруг hashcat успел записать
         new_p = _parse_progress(log_file)
@@ -437,16 +440,16 @@ def run_cracking(state):
         time.sleep(1)
 
     if cap.get("cracked"):
-        print(f"[+] Готово: {cap['name']} — пароль в пункте 10.")
+        print(t("crack.done", name=cap["name"]))
     else:
-        print(f"\n[+] Сессия сохранена: {session_name} ({cap.get('progress', 0)}%)")
+        print(t("crack.session_saved", s=session_name, p=cap.get("progress", 0)))
 
 
 def list_cracked(state):
     if not state["cracked"]:
-        print("[-] Взломанных сетей пока нет.")
+        print(t("crack.none_cracked"))
         return
-    print("\n{:<30} {:<30} {}".format("Сеть (ESSID)", "Пароль", "Cap"))
+    print("\n{:<30} {:<30} {}".format(t("crack.col_net"), t("crack.col_pw"), "Cap"))
     print("-" * 80)
     for c in state["cracked"]:
         print("{:<30} {:<30} {}".format(
@@ -504,7 +507,7 @@ def _check_cracked(state, cap, out_file):
                 "password": password,
                 "cap": cap["name"],
             })
-            print(f"\n[+] Подобран пароль: {essid} -> {password}")
+            print(t("crack.pw_got", essid=essid, password=password))
         found_any = True
 
     if found_any:
@@ -521,29 +524,29 @@ def cracker_menu():
     while True:
         os.system("clear")
         print("=" * 62)
-        print("  Взлом пароля (hashcat)")
+        print(f"  {t('crack.menu_title')}")
         print("=" * 62)
         print()
-        print("  Файлы для взлома:")
-        print("    1. Добавить cap (.cap)")
-        print("    2. Добавить готовый .hc22000")
-        print("    3. Удалить cap")
-        print("    4. Просмотр доступных cap")
+        print(t("crack.grp_files"))
+        print(t("crack.m_add_cap"))
+        print(t("crack.m_add_hc"))
+        print(t("crack.m_del_cap"))
+        print(t("crack.m_list_cap"))
         print()
-        print("  Словари:")
-        print("    5. Добавить словарь")
-        print("    6. Удалить словарь")
-        print("    7. Просмотр словарей")
+        print(t("crack.grp_wl"))
+        print(t("crack.m_add_wl"))
+        print(t("crack.m_del_wl"))
+        print(t("crack.m_list_wl"))
         print()
-        print("  Взлом:")
-        print("    8. Начать/продолжить взлом")
-        print("    9. Просмотр сессий")
-        print("   10. Подобранные пароли")
+        print(t("crack.grp_crack"))
+        print(t("crack.m_run"))
+        print(t("crack.m_sessions"))
+        print(t("crack.m_cracked"))
         print()
-        print("    0. Назад")
+        print(t("crack.m_back"))
         print()
 
-        choice = input("Выбор: ").strip()
+        choice = input(t("common.choice")).strip()
 
         if choice == '1':
             add_cap(state)
@@ -568,6 +571,6 @@ def cracker_menu():
         elif choice == '0':
             return
         else:
-            print("Неизвестный пункт.")
+            print(t("common.unknown_item"))
 
-        input("\nEnter — продолжить...")
+        input(t("common.enter_continue"))

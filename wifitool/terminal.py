@@ -12,6 +12,11 @@ from pathlib import Path
 from .constants import TERMINALS
 
 
+def sh_quote(s):
+    """Безопасно оборачивает строку в одинарные кавычки для bash."""
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
 def find_terminal():
     """Ищет доступный эмулятор терминала. Возвращает (имя, базовую команду) или (None, None)."""
     import shutil
