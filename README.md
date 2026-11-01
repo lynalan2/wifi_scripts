@@ -14,6 +14,21 @@ saved and can be changed anytime from the menu (item 8).
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshots/handshake-live.png" alt="Live handshake capture" width="900"><br>
+  <em>Live handshake capture: the tool's progress (left) next to the airodump
+  window (right); the watchdog revives the adapter when the driver stalls.</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/handshake-capture.png" alt="Handshake caught and saved" width="640"><br>
+  <em>A WPA2 handshake caught and saved.</em>
+</p>
+
+---
+
 ## Requirements
 
 - Linux with root (`sudo`), a Wi-Fi adapter that supports **monitor mode**

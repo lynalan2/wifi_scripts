@@ -14,6 +14,21 @@ Evil Twin (поддельная точка + captive-портал / сниффи
 
 ---
 
+## Скриншоты
+
+<p align="center">
+  <img src="assets/screenshots/handshake-live.png" alt="Захват handshake вживую" width="900"><br>
+  <em>Захват handshake вживую: прогресс скрипта (слева) рядом с окном airodump
+  (справа); watchdog оживляет адаптер, когда драйвер зависает.</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/handshake-capture.png" alt="Handshake пойман и сохранён" width="640"><br>
+  <em>WPA2 handshake пойман и сохранён.</em>
+</p>
+
+---
+
 ## Требования
 
 - Linux с правами root (`sudo`), Wi-Fi адаптер с поддержкой **monitor mode**
