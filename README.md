@@ -51,6 +51,12 @@ sudo apt install aircrack-ng hcxtools hcxdumptool hashcat \
                  hostapd dnsmasq iptables xterm
 ```
 
+There are **no third-party Python packages** (standard library only), so
+there is nothing to `pip install`. The external CLI tools above are not
+installed automatically; **menu item 7 (Dependencies)** shows a status table
+of every tool and can install the missing ones for you via `apt` (with
+confirmation). On a non-apt distro it lists the packages to install manually.
+
 ## Run
 
 ```bash
@@ -72,7 +78,7 @@ Cracking:
   5. Password cracking                    — hashcat sessions over .cap/.hc22000
 Attacks:
   6. Evil Twin                            — rogue AP: AP / captive portal / sniffing
-  0. Change adapter   8. Language   9. Exit
+  0. Change adapter   7. Dependencies   8. Language   9. Exit
 ```
 
 ## Features
