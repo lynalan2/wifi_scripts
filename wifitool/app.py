@@ -3,6 +3,7 @@
 import time
 
 from . import iface
+from . import deps
 from .system import check_root
 from .ui import clear_screen, pause, ask_yes_no, print_title
 from .menu import FEATURES
@@ -43,6 +44,7 @@ def _print_menu(interface):
 
     print()
     print(t("app.change_adapter"))
+    print(t("app.deps"))
     print(t("app.language"))
     print(t("app.exit"))
     print()
@@ -62,6 +64,8 @@ def main_menu(interface):
         elif choice == '2':
             iface.set_managed_mode(interface)
             pause()
+        elif choice == '7':
+            deps.deps_menu()
         elif choice == '8':
             choose_language_interactive()
         elif choice == '0':
@@ -89,6 +93,13 @@ def main():
     # Первый запуск — спросить язык; дальше берём сохранённый.
     if saved_lang() is None:
         choose_language_interactive(first_time=True)
+
+    # Необязательная стартовая подсказка (как таблица тулзов в airgeddon):
+    # не блокируем, но сообщаем, если нет важных утилит.
+    missing_essential = deps.essential_missing()
+    if missing_essential:
+        print(t("app.deps_hint", tools=", ".join(missing_essential)))
+        pause()
 
     while True:
         clear_screen()
