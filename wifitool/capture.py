@@ -159,32 +159,40 @@ def _any_file_fresh(paths, threshold=15):
 def _revive_watchdog(interface, watch_files, stop_event,
                      check_interval=WATCHDOG["check_interval"],
                      stale_threshold=WATCHDOG["stale_threshold"],
-                     cooldown=WATCHDOG["cooldown"],
                      revive_seconds=WATCHDOG["revive_seconds"],
-                     startup_grace=WATCHDOG["startup_grace"]):
+                     startup_grace=WATCHDOG["startup_grace"],
+                     recovery_grace=WATCHDOG["recovery_grace"],
+                     need_streak=WATCHDOG["stale_streak"]):
     """
     Следит за mtime .cap/.csv. Если ни один файл не обновлялся stale_threshold
-    секунд — гоняет airodump-ng без канала revive_seconds секунд, чтобы драйвер
-    переинициализировался. startup_grace — окно в начале, пока airodump ещё
-    поднимается и файлы законно отсутствуют.
+    секунд (и подтверждено need_streak подряд проверками) — один раз гоняет
+    airodump-ng без канала revive_seconds секунд, чтобы драйвер переинициализировался.
+
+    quiet_until — окно, в которое не судим о застое: в начале (startup_grace,
+    airodump ещё поднимается) и ПОСЛЕ оживления (recovery_grace). Второе важно:
+    во время оживления канал уводится, .cap не растёт, и без паузы на
+    восстановление watchdog зациклил бы ревайвы один за другим.
     """
-    start = time.time()
-    last_revive = start
     seen_file = False
+    stale_streak = 0
+    quiet_until = time.time() + startup_grace
 
     while not stop_event.is_set():
         time.sleep(check_interval)
         if stop_event.is_set():
             break
-        if time.time() - start < startup_grace:
+        if time.time() < quiet_until:
             continue
         if any(os.path.exists(p) for p in watch_files):
             seen_file = True
         elif not seen_file:
             continue
+
         if _any_file_fresh(watch_files, stale_threshold):
+            stale_streak = 0
             continue
-        if time.time() - last_revive < cooldown:
+        stale_streak += 1
+        if stale_streak < need_streak:   # дебаунс: ждём подтверждения застоя
             continue
 
         print(t("cap.revive", n=stale_threshold, r=revive_seconds))
@@ -207,7 +215,10 @@ def _revive_watchdog(interface, watch_files, stop_event,
                     os.killpg(os.getpgid(revive.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-        last_revive = time.time()
+        # Дать адаптеру восстановиться и начать писать файлы, прежде чем снова
+        # оценивать застой — иначе следующий тик тут же сработает повторно.
+        stale_streak = 0
+        quiet_until = time.time() + recovery_grace
         print(t("cap.revive_done"))
 
 
