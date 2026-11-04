@@ -155,6 +155,16 @@ wifitool/
 Data lives in `cracker_data/` and `evil_twin_data/` (git-ignored); the language
 choice in `~/.config/wifitool/config.json`.
 
+## Tests
+
+Unit tests cover the pure parsers (airodump CSV, `.hc22000`, hashcat output) —
+no root, adapter or Wi-Fi needed. Sample data lives in `tests/fixtures/`.
+
+```bash
+pip install -r requirements-dev.txt   # installs pytest
+pytest
+```
+
 ## Adding a new feature
 
 1. Create `wifitool/<feature>.py` with `def <feature>_flow(interface): ...`

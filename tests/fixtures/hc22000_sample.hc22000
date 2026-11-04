@@ -1,0 +1,5 @@
+WPA*02*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*001122334455*bbbbbbbbbbbb*4d794e6574*cccccccccccccccccccc*00
+WPA*01*dddddddddddddddddddddddddddddddd*001122334455*bbbbbbbbbbbb*4d794e6574*eeeeeeeeeeeeeeeeeeee*00
+WPA*02*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*aabbccddeeff*bbbbbbbbbbbb*4d794e6574*cccccccccccccccccccc*00
+WPA*02*deadbeef
+GARBAGE LINE NOT A HASH

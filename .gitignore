@@ -13,3 +13,6 @@ __pycache__/
 test.py
 # Evil Twin runtime data (captured creds, user portal templates)
 evil_twin_data/
+
+# tests
+.pytest_cache/

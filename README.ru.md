@@ -155,6 +155,16 @@ wifitool/
 Данные — в `cracker_data/` и `evil_twin_data/` (в .gitignore); выбор языка — в
 `~/.config/wifitool/config.json`.
 
+## Тесты
+
+Юнит-тесты покрывают чистые парсеры (CSV airodump, `.hc22000`, вывод hashcat) —
+без root, адаптера и Wi-Fi. Образцы данных — в `tests/fixtures/`.
+
+```bash
+pip install -r requirements-dev.txt   # поставит pytest
+pytest
+```
+
 ## Как добавить новую функцию
 
 1. Создайте `wifitool/<feature>.py` с `def <feature>_flow(interface): ...`

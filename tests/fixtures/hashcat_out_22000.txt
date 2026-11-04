@@ -1,0 +1,2 @@
+WPA*02*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*001122334455*bbbbbbbbbbbb*4d794e6574*cccccccccccccccccccc*00:Secret123
+WPA*02*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*001122334455*bbbbbbbbbbbb*4d794e6574*cccccccccccccccccccc*00:$HEX[70617373]
