@@ -16,3 +16,7 @@ evil_twin_data/
 
 # tests
 .pytest_cache/
+
+# но тестовые образцы данных держим в репозитории
+!tests/fixtures/
+!tests/fixtures/**

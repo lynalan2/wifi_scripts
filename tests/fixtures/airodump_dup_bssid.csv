@@ -1,0 +1,3 @@
+BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key
+AA:BB:CC:DD:EE:FF, t, t,  6,  360, WPA2, CCMP, PSK, -40, 10, 0, 0, 0, DupNet, 
+AA:BB:CC:DD:EE:FF, t, t,  6,  360, WPA2, CCMP, PSK, -41, 10, 0, 0, 0, DupNet, 

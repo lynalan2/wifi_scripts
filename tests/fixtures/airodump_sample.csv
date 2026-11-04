@@ -1,0 +1,9 @@
+BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key
+
+AA:BB:CC:DD:EE:FF, 2024-01-01 10:00:00, 2024-01-01 10:05:00,  6,  360, WPA2, CCMP, PSK, -40,  120,  0,   0.  0.  0.  0,   5, MyNet,
+11:22:33:44:55:66, 2024-01-01 10:00:00, 2024-01-01 10:05:00,  11,  360, WPA2, CCMP, PSK, -70,  40,  0,   0.  0.  0.  0,   0, ,
+22:33:44:55:66:77, 2024-01-01 10:00:00, 2024-01-01 10:05:00,  1 ,  360, WPA2, CCMP, PSK, -55,  40,  0,   0.  0.  0.  0,  11,   Spaced Name  ,
+33:44:55:66:77:88, 2024-01-01 10:00:00, 2024-01-01 10:05:00, 36,  360, WPA3, CCMP, SAE, -60,  40,  0,   0.  0.  0.  0,  11, Comma,Inside,
+
+Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs
+99:88:77:66:55:44, 2024-01-01 10:00:00, 2024-01-01 10:05:00,  -50,   10, AA:BB:CC:DD:EE:FF,
